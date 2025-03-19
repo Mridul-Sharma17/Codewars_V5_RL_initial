@@ -1,469 +1,358 @@
-import re
-import json
-from typing import Dict, Any, List, Tuple, Optional
+"""
+Strategy encoder/decoder for tower defense strategies.
+Converts between parameter dictionaries and compact team_signal strings.
+"""
+
+from typing import Dict, Any, List, Optional
 
 class StrategyEncoder:
     """
-    Handles encoding and decoding of strategy parameters to fit within the team_signal
-    character limit (200 chars) while preserving key strategy information.
+    Encodes strategy parameters into compact team_signal format and back.
+    Enables efficient parameter passing between evolution system and game.
     """
     
-    def __init__(self, max_length: int = 200):
+    def __init__(self, max_length=200):
         """
-        Initialize the strategy encoder.
+        Initialize the encoder with a maximum length constraint.
         
         Args:
-            max_length: Maximum length for encoded strategy string
+            max_length: Maximum length for encoded strings
         """
         self.max_length = max_length
         
-        # Define parameter keys and their short codes
-        self.param_codes = {
-            "version": "v",
-            "lane_preference": "l",
-            "elixir_thresholds.min_deploy": "e",
-            "elixir_thresholds.save_threshold": "s",
-            "elixir_thresholds.emergency_threshold": "m",
-            "position_settings.y_default": "y",
-            "position_settings.defensive_y": "d",
-            "position_settings.x_range.left": "xl",
-            "position_settings.x_range.right": "xr",
-            "defensive_trigger": "dt",
-            "counter_weights.air_vs_ground": "ca",
-            "counter_weights.splash_vs_group": "cs",
-            "counter_weights.tank_priority": "ct",
-            "troop_priority": "tp",
-            "wins": "w",
-            "losses": "L"
-        }
-        
-        # Reverse lookup for decoding
-        self.code_params = {v: k for k, v in self.param_codes.items()}
-        
-        # Lane preference shortenings
-        self.lane_codes = {
-            "left": "L",
-            "right": "R",
-            "center": "C",
-            "split": "S"
-        }
-        
-        # Reverse lookup for lane codes
-        self.lane_decode = {v: k for k, v in self.lane_codes.items()}
-        
-        # Troop name abbreviations (first letter of each troop)
-        self.troop_abbrevs = {
-            "archer": "a",
-            "giant": "g",
+        # Define troop mappings for compact encoding
+        self.troop_mapping = {
             "dragon": "d",
-            "balloon": "b",
-            "prince": "p",
-            "barbarian": "B",
-            "knight": "k",
-            "minion": "m",
-            "skeleton": "s",
             "wizard": "w",
             "valkyrie": "v",
-            "musketeer": "M"
+            "musketeer": "m",
+            "knight": "k",
+            "archer": "a",
+            "minion": "i",  # Use 'i' because 'm' is already used
+            "barbarian": "b",
+            "prince": "p",
+            "giant": "g",
+            "skeleton": "s",
+            "balloon": "l"
         }
         
-        # Reverse lookup for troop abbreviations
-        self.troop_decode = {v: k for k, v in self.troop_abbrevs.items()}
+        # Reverse mapping for decoding
+        self.reverse_troop_mapping = {v: k for k, v in self.troop_mapping.items()}
     
     def encode(self, strategy: Dict[str, Any]) -> str:
         """
-        Encode a strategy into a compact string representation.
+        Encode strategy parameters as a compact string for team_signal.
         
         Args:
-            strategy: Strategy dictionary
+            strategy: Strategy parameter dictionary
             
         Returns:
-            Compact string representation
+            Encoded parameter string
         """
+        # Create encoded parts
         parts = []
         
-        # Version always comes first
-        parts.append(f"{self.param_codes['version']}:1")
+        # Version
+        parts.append("v:1")
         
-        # Add lane preference with short code
-        if "lane_preference" in strategy:
-            lane = strategy["lane_preference"]
-            lane_code = self.lane_codes.get(lane, lane[0].upper())
-            parts.append(f"{self.param_codes['lane_preference']}:{lane_code}")
+        # Lane preference
+        lane_pref = strategy.get("lane_preference", "adaptive")
+        if lane_pref:
+            parts.append(f"l:{lane_pref[0]}")
         
-        # Add elixir thresholds
-        if "elixir_thresholds" in strategy:
-            et = strategy["elixir_thresholds"]
-            if "min_deploy" in et:
-                parts.append(f"{self.param_codes['elixir_thresholds.min_deploy']}:{et['min_deploy']}")
-            if "save_threshold" in et:
-                parts.append(f"{self.param_codes['elixir_thresholds.save_threshold']}:{et['save_threshold']}")
-            if "emergency_threshold" in et:
-                parts.append(f"{self.param_codes['elixir_thresholds.emergency_threshold']}:{et['emergency_threshold']}")
+        # Elixir thresholds
+        elixir_thresholds = strategy.get("elixir_thresholds", {})
+        min_deploy = elixir_thresholds.get("min_deploy", 4.0)
+        parts.append(f"e:{min_deploy:.2f}")
         
-        # Add position settings
-        if "position_settings" in strategy:
-            ps = strategy["position_settings"]
-            if "y_default" in ps:
-                parts.append(f"{self.param_codes['position_settings.y_default']}:{ps['y_default']}")
-            if "defensive_y" in ps:
-                parts.append(f"{self.param_codes['position_settings.defensive_y']}:{ps['defensive_y']}")
-            if "x_range" in ps and isinstance(ps["x_range"], list) and len(ps["x_range"]) >= 2:
-                parts.append(f"{self.param_codes['position_settings.x_range.left']}:{ps['x_range'][0]}")
-                parts.append(f"{self.param_codes['position_settings.x_range.right']}:{ps['x_range'][1]}")
+        save_threshold = elixir_thresholds.get("save_threshold", 7.0)
+        parts.append(f"s:{save_threshold:.2f}")
         
-        # Add defensive trigger
-        if "defensive_trigger" in strategy:
-            parts.append(f"{self.param_codes['defensive_trigger']}:{strategy['defensive_trigger']:.1f}")
+        emergency_threshold = elixir_thresholds.get("emergency_threshold", 2.0)
+        parts.append(f"em:{emergency_threshold:.2f}")
         
-        # Add counter weights
-        if "counter_weights" in strategy:
-            cw = strategy["counter_weights"]
-            if "air_vs_ground" in cw:
-                parts.append(f"{self.param_codes['counter_weights.air_vs_ground']}:{cw['air_vs_ground']:.1f}")
-            if "splash_vs_group" in cw:
-                parts.append(f"{self.param_codes['counter_weights.splash_vs_group']}:{cw['splash_vs_group']:.1f}")
-            if "tank_priority" in cw:
-                parts.append(f"{self.param_codes['counter_weights.tank_priority']}:{cw['tank_priority']:.1f}")
+        # Defensive trigger
+        defensive_trigger = strategy.get("defensive_trigger", 0.65)
+        parts.append(f"dt:{defensive_trigger:.2f}")
         
-        # Add troop priority as abbreviated sequence
-        if "troop_priority" in strategy:
-            abbrevs = []
-            for troop in strategy["troop_priority"]:
-                abbrev = self.troop_abbrevs.get(troop, troop[0].lower())
-                abbrevs.append(abbrev)
-            if abbrevs:
-                parts.append(f"{self.param_codes['troop_priority']}:{''.join(abbrevs)}")
+        aggression_trigger = strategy.get("aggression_trigger", 0.25)
+        if aggression_trigger:
+            parts.append(f"at:{aggression_trigger:.2f}")
         
-        # Add wins/losses from metrics if available
-        if "metrics" in strategy:
-            metrics = strategy["metrics"]
-            if "wins" in metrics and metrics["wins"] > 0:
-                parts.append(f"{self.param_codes['wins']}:{metrics['wins']}")
-            if "losses" in metrics and metrics["losses"] > 0:
-                parts.append(f"{self.param_codes['losses']}:{metrics['losses']}")
+        # Position settings
+        position_settings = strategy.get("position_settings", {})
+        y_default = position_settings.get("y_default", 40) 
+        parts.append(f"y:{y_default}")
         
-        # Combine all parts with commas
-        encoded = ",".join(parts)
+        y_defensive = position_settings.get("defensive_y", 20)
+        parts.append(f"yd:{y_defensive}")
         
-        # Ensure we don't exceed the maximum length
-        if len(encoded) > self.max_length:
-            # Priority order: version, lane, elixir, position, troops, metrics
-            # Start removing the least important parameters
-            while len(encoded) > self.max_length:
-                # Try removing weights first
-                if any(p in encoded for p in ["ca:", "cs:", "ct:"]):
-                    for code in ["ct:", "cs:", "ca:"]:
-                        pattern = f",{code}[^,]*"
-                        match = re.search(pattern, encoded)
-                        if match:
-                            encoded = encoded.replace(match.group(0), "")
-                            break
+        y_aggressive = position_settings.get("y_aggressive", 47)
+        if y_aggressive:
+            parts.append(f"ya:{y_aggressive}")
+        
+        x_range = position_settings.get("x_range", [-20, 20])
+        if isinstance(x_range, list) and len(x_range) >= 2:
+            parts.append(f"xl:{x_range[0]}")
+            parts.append(f"xr:{x_range[1]}")
+        
+        # Troop priority as abbreviations
+        troop_priority = strategy.get("troop_priority", [])
+        if troop_priority:
+            abbr = ""
+            for troop in troop_priority[:8]:  # Limit to 8 troops
+                if not troop:
+                    abbr += "x"
                     continue
-                
-                # Then try removing losses
-                if "L:" in encoded:
-                    pattern = f",{self.param_codes['losses']}:[^,]*"
-                    match = re.search(pattern, encoded)
-                    if match:
-                        encoded = encoded.replace(match.group(0), "")
-                        continue
-                
-                # Then try removing wins
-                if "w:" in encoded:
-                    pattern = f",{self.param_codes['wins']}:[^,]*"
-                    match = re.search(pattern, encoded)
-                    if match:
-                        encoded = encoded.replace(match.group(0), "")
-                        continue
-                
-                # Then try shortening troop priority
-                if "tp:" in encoded:
-                    pattern = f"{self.param_codes['troop_priority']}:([^,]*)"
-                    match = re.search(pattern, encoded)
-                    if match:
-                        troops = match.group(1)
-                        if len(troops) > 4:
-                            shortened = troops[:4]  # Keep only first 4 troops
-                            encoded = encoded.replace(f"{self.param_codes['troop_priority']}:{troops}", 
-                                                     f"{self.param_codes['troop_priority']}:{shortened}")
-                            continue
-                
-                # Last resort, truncate and add ellipsis
-                if len(encoded) > self.max_length:
-                    encoded = encoded[:self.max_length-3] + "..."
-                    break
+                    
+                # Get first letter of troop name
+                if troop.lower() in self.troop_mapping:
+                    abbr += self.troop_mapping[troop.lower()]
+                else:
+                    # Fallback to first letter if not in mapping
+                    abbr += troop[0].lower()
+                    
+            parts.append(f"tp:{abbr}")
         
-        return encoded
-    
+        # Counter weights
+        counter_weights = strategy.get("counter_weights", {})
+        
+        air_vs_ground = counter_weights.get("air_vs_ground", 1.5)
+        parts.append(f"ca:{air_vs_ground:.1f}")
+        
+        splash_vs_group = counter_weights.get("splash_vs_group", 2.0)
+        parts.append(f"cs:{splash_vs_group:.1f}")
+        
+        tank_priority = counter_weights.get("tank_priority", 1.3)
+        parts.append(f"ct:{tank_priority:.1f}")
+        
+        range_bonus = counter_weights.get("range_bonus", 1.5)
+        parts.append(f"cr:{range_bonus:.1f}")
+        
+        # Join and ensure within max length
+        signal = ",".join(parts)
+        if len(signal) > self.max_length:
+            signal = signal[:self.max_length]
+            
+        return signal
+        
     def decode(self, signal: str) -> Dict[str, Any]:
         """
-        Decode a strategy from its string representation.
+        Decode a strategy from encoded team_signal string.
         
         Args:
-            signal: Encoded strategy string
+            signal: Encoded parameter string
             
         Returns:
-            Strategy dictionary with decoded parameters
+            Strategy parameter dictionary
         """
-        if not signal or ":" not in signal:
-            # Return empty strategy if signal is invalid
-            return {}
-        
+        # Default strategy structure
         strategy = {
-            "elixir_thresholds": {},
-            "position_settings": {},
-            "counter_weights": {}
+            "elixir_thresholds": {
+                "min_deploy": 4.0,
+                "save_threshold": 7.0,
+                "emergency_threshold": 2.0
+            },
+            "position_settings": {
+                "x_range": [-20, 20],
+                "y_default": 40,
+                "defensive_y": 20,
+                "y_aggressive": 47
+            },
+            "defensive_trigger": 0.65,
+            "aggression_trigger": 0.25,
+            "counter_weights": {
+                "air_vs_ground": 1.5,
+                "splash_vs_group": 2.0,
+                "tank_priority": 1.3,
+                "range_bonus": 1.5
+            },
+            "lane_preference": "adaptive",
+            "troop_priority": ["dragon", "wizard", "valkyrie", "musketeer", 
+                              "knight", "archer", "minion", "barbarian"]
         }
         
-        # Split into parts
+        # Parse signal parts
         parts = signal.split(",")
         
         for part in parts:
             if ":" not in part:
                 continue
                 
-            code, value = part.split(":", 1)
-            code = code.strip()
+            key, value = part.split(":", 1)
+            key = key.strip()
             value = value.strip()
             
-            if code not in self.code_params:
-                # Unknown code, skip
-                continue
+            try:
+                # Version
+                if key == "v":
+                    strategy["version"] = value
                 
-            param = self.code_params[code]
-            
-            # Handle specific parameter types
-            if param == "version":
-                strategy["version"] = int(value)
-                
-            elif param == "lane_preference":
-                if value in self.lane_decode:
-                    strategy["lane_preference"] = self.lane_decode[value]
-                else:
-                    # Default to first letter as lane name
-                    lanes = {"L": "left", "R": "right", "C": "center", "S": "split"}
-                    strategy["lane_preference"] = lanes.get(value, "right")
-                    
-            elif param.startswith("elixir_thresholds."):
-                subparam = param.split(".", 1)[1]
-                try:
-                    strategy["elixir_thresholds"][subparam] = float(value)
-                except ValueError:
-                    strategy["elixir_thresholds"][subparam] = 4  # Default
-                    
-            elif param.startswith("position_settings."):
-                parts = param.split(".", 1)[1]
-                if parts == "x_range.left":
-                    if "x_range" not in strategy["position_settings"]:
-                        strategy["position_settings"]["x_range"] = [-20, 20]  # Default
-                    try:
-                        strategy["position_settings"]["x_range"][0] = int(value)
-                    except ValueError:
-                        pass
-                elif parts == "x_range.right":
-                    if "x_range" not in strategy["position_settings"]:
-                        strategy["position_settings"]["x_range"] = [-20, 20]  # Default
-                    try:
-                        strategy["position_settings"]["x_range"][1] = int(value)
-                    except ValueError:
-                        pass
-                else:
-                    try:
-                        strategy["position_settings"][parts] = int(value)
-                    except ValueError:
-                        if parts == "y_default":
-                            strategy["position_settings"][parts] = 45  # Default
-                        elif parts == "defensive_y":
-                            strategy["position_settings"][parts] = 20  # Default
-                    
-            elif param == "defensive_trigger":
-                try:
-                    strategy["defensive_trigger"] = float(value)
-                except ValueError:
-                    strategy["defensive_trigger"] = 0.7  # Default
-                    
-            elif param.startswith("counter_weights."):
-                subparam = param.split(".", 1)[1]
-                try:
-                    strategy["counter_weights"][subparam] = float(value)
-                except ValueError:
-                    defaults = {
-                        "air_vs_ground": 1.2,
-                        "splash_vs_group": 1.5,
-                        "tank_priority": 1.3
-                    }
-                    strategy["counter_weights"][subparam] = defaults.get(subparam, 1.0)
-                    
-            elif param == "troop_priority":
-                # Decode abbreviated troops
-                troops = []
-                for char in value:
-                    if char in self.troop_decode:
-                        troops.append(self.troop_decode[char])
+                # Lane preference
+                elif key == "l":
+                    if value == "l":
+                        strategy["lane_preference"] = "left"
+                    elif value == "r":
+                        strategy["lane_preference"] = "right"
+                    elif value == "c":
+                        strategy["lane_preference"] = "center"
+                    elif value == "s":
+                        strategy["lane_preference"] = "split"
                     else:
-                        # Try to guess based on first letter
-                        found = False
-                        for troop, abbrev in self.troop_abbrevs.items():
-                            if troop[0].lower() == char.lower():
-                                troops.append(troop)
-                                found = True
-                                break
-                        if not found and char.isalpha():
-                            # Use as-is if we can't match
-                            troops.append(char.lower())
+                        strategy["lane_preference"] = "adaptive"
                 
-                strategy["troop_priority"] = troops
+                # Elixir thresholds
+                elif key == "e":
+                    strategy["elixir_thresholds"]["min_deploy"] = float(value)
+                elif key == "s":
+                    strategy["elixir_thresholds"]["save_threshold"] = float(value)
+                elif key == "em":
+                    strategy["elixir_thresholds"]["emergency_threshold"] = float(value)
                 
-            elif param in ["wins", "losses"]:
-                if "metrics" not in strategy:
-                    strategy["metrics"] = {}
-                try:
-                    strategy["metrics"][param] = int(value)
-                except ValueError:
-                    strategy["metrics"][param] = 0
+                # Triggers
+                elif key == "dt":
+                    strategy["defensive_trigger"] = float(value)
+                elif key == "at":
+                    strategy["aggression_trigger"] = float(value)
+                
+                # Position settings
+                elif key == "y":
+                    strategy["position_settings"]["y_default"] = int(float(value))
+                elif key == "yd":
+                    strategy["position_settings"]["defensive_y"] = int(float(value))
+                elif key == "ya":
+                    strategy["position_settings"]["y_aggressive"] = int(float(value))
+                elif key == "xl":
+                    strategy["position_settings"]["x_range"][0] = int(float(value))
+                elif key == "xr":
+                    strategy["position_settings"]["x_range"][1] = int(float(value))
+                
+                # Troop priority
+                elif key == "tp":
+                    troops = []
+                    for char in value:
+                        if char.lower() in self.reverse_troop_mapping:
+                            troops.append(self.reverse_troop_mapping[char.lower()])
+                        elif char.lower() == "x":
+                            # Skip placeholder
+                            pass
+                    
+                    # If we found any troops, update the priority list
+                    if troops:
+                        strategy["troop_priority"] = troops
+                
+                # Counter weights
+                elif key == "ca":
+                    strategy["counter_weights"]["air_vs_ground"] = float(value)
+                elif key == "cs":
+                    strategy["counter_weights"]["splash_vs_group"] = float(value)
+                elif key == "ct":
+                    strategy["counter_weights"]["tank_priority"] = float(value)
+                elif key == "cr":
+                    strategy["counter_weights"]["range_bonus"] = float(value)
+                
+            except (ValueError, IndexError):
+                # Skip parameters with invalid values
+                pass
         
         return strategy
     
-    def extract_opponent_troops(self, signal: str) -> List[str]:
+    def strategy_to_display_string(self, strategy: Dict[str, Any]) -> str:
         """
-        Extract opponent troop names from a signal string.
-        These are typically added during gameplay to track opponent's deck.
+        Convert a strategy to a human-readable display string.
         
         Args:
-            signal: Encoded strategy string
+            strategy: Strategy parameter dictionary
             
         Returns:
-            List of opponent troop names
+            Human-readable description string
         """
-        if not signal:
-            return []
-            
-        # Strategy parameters use key:value format
-        # Opponent troop names are added as plain strings
-        troops = []
+        lines = []
         
-        parts = signal.split(",")
-        for part in parts:
-            part = part.strip()
-            # If there's no colon, it might be a troop name
-            if ":" not in part and part and not part.endswith("..."):
-                troops.append(part)
+        # Basic info
+        name = strategy.get("name", "Unnamed")
+        lines.append(f"Strategy: {name}")
         
-        return troops
-
-    def update_signal_with_troops(self, signal: str, new_troops: List[str]) -> str:
-        """
-        Update signal with new opponent troops while preserving strategy parameters.
+        # Lane preference
+        lane = strategy.get("lane_preference", "adaptive")
+        lines.append(f"Lane: {lane}")
         
-        Args:
-            signal: Current signal string
-            new_troops: New troop names to add
-            
-        Returns:
-            Updated signal string
-        """
-        # First extract all the parameter parts (containing :)
-        param_parts = []
-        existing_troops = []
+        # Elixir management
+        elixir = strategy.get("elixir_thresholds", {})
+        min_deploy = elixir.get("min_deploy", 4.0)
+        save = elixir.get("save_threshold", 7.0)
+        emerg = elixir.get("emergency_threshold", 2.0)
+        lines.append(f"Elixir: deploy={min_deploy}, save={save}, emergency={emerg}")
         
-        if signal:
-            for part in signal.split(","):
-                part = part.strip()
-                if ":" in part:
-                    param_parts.append(part)
-                elif part:  # Non-empty troop name
-                    existing_troops.append(part)
+        # Position settings
+        pos = strategy.get("position_settings", {})
+        x_range = pos.get("x_range", [-20, 20])
+        y_default = pos.get("y_default", 40)
+        y_def = pos.get("defensive_y", 20)
+        lines.append(f"Position: x={x_range}, y={y_default}, defensive_y={y_def}")
         
-        # Combine existing and new troops, removing duplicates
-        all_troops = existing_troops.copy()
-        for troop in new_troops:
-            if troop not in all_troops:
-                all_troops.append(troop)
+        # Triggers
+        def_trigger = strategy.get("defensive_trigger", 0.65)
+        lines.append(f"Defensive trigger: {def_trigger}")
         
-        # Reconstruct signal
-        new_signal = ",".join(param_parts)
-        if new_signal and all_troops:
-            new_signal += ","
-        if all_troops:
-            new_signal += ",".join(all_troops)
+        # Troop priority
+        troops = strategy.get("troop_priority", [])
+        if troops:
+            troop_str = ", ".join(troops[:8])
+            lines.append(f"Troop priority: {troop_str}")
         
-        # Ensure it doesn't exceed max length
-        if len(new_signal) > self.max_length:
-            # First try to limit the number of troops
-            param_str = ",".join(param_parts)
-            max_troops_length = self.max_length - len(param_str) - (1 if param_str else 0)
-            
-            if max_troops_length > 0:
-                troops_str = ""
-                for troop in all_troops:
-                    if len(troops_str) + len(troop) + 1 <= max_troops_length:
-                        if troops_str:
-                            troops_str += ","
-                        troops_str += troop
-                    else:
-                        break
-                
-                new_signal = param_str
-                if param_str and troops_str:
-                    new_signal += ","
-                new_signal += troops_str
-            else:
-                # If we can't fit any troops, prioritize parameters
-                new_signal = param_str
-                if len(new_signal) > self.max_length:
-                    new_signal = new_signal[:self.max_length-3] + "..."
+        # Counter weights
+        cw = strategy.get("counter_weights", {})
+        lines.append("Counter weights:")
+        for k, v in cw.items():
+            lines.append(f"  {k}: {v}")
         
-        return new_signal
+        # Metrics if available
+        metrics = strategy.get("metrics", {})
+        if metrics:
+            games = metrics.get("games_played", 0)
+            wins = metrics.get("wins", 0)
+            win_rate = metrics.get("win_rate", 0)
+            lines.append(f"Performance: {wins}/{games} wins ({win_rate:.3f})")
+        
+        return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    # Example usage
+    # Test encoder/decoder
     encoder = StrategyEncoder()
     
+    # Example strategy
     test_strategy = {
+        "name": "TestStrategy",
         "lane_preference": "right",
         "elixir_thresholds": {
-            "min_deploy": 3.5,
-            "save_threshold": 7,
-            "emergency_threshold": 2
+            "min_deploy": 4.2,
+            "save_threshold": 7.5,
+            "emergency_threshold": 1.8
         },
         "position_settings": {
-            "x_range": [-20, 20],
-            "y_default": 45,
-            "defensive_y": 20
+            "x_range": [-15, 15],
+            "y_default": 42,
+            "defensive_y": 18
         },
         "defensive_trigger": 0.7,
         "counter_weights": {
-            "air_vs_ground": 1.5,
-            "splash_vs_group": 1.7,
-            "tank_priority": 1.2
+            "air_vs_ground": 1.8,
+            "splash_vs_group": 2.1,
+            "tank_priority": 1.5
         },
-        "troop_priority": ["dragon", "wizard", "valkyrie", "musketeer", "knight", "archer", "minion", "barbarian"],
-        "metrics": {
-            "games_played": 10,
-            "wins": 8,
-            "losses": 2,
-            "win_rate": 0.8
-        }
+        "troop_priority": ["wizard", "dragon", "valkyrie", "musketeer", 
+                          "knight", "archer", "minion", "barbarian"]
     }
     
-    # Test encoding
+    # Encode and decode
     encoded = encoder.encode(test_strategy)
-    print(f"Encoded strategy ({len(encoded)} chars):")
-    print(encoded)
-    
-    # Test decoding
     decoded = encoder.decode(encoded)
-    print("\nDecoded strategy:")
-    print(json.dumps(decoded, indent=2))
     
-    # Test updating with troops
-    updated = encoder.update_signal_with_troops(encoded, ["Knight", "Archer", "Wizard"])
-    print(f"\nUpdated with troops ({len(updated)} chars):")
-    print(updated)
-    
-    # Test extracting troops
-    troops = encoder.extract_opponent_troops(updated)
-    print("\nExtracted troops:")
-    print(troops)
+    print("Original:")
+    print(encoder.strategy_to_display_string(test_strategy))
+    print("\nEncoded:")
+    print(encoded)
+    print("\nDecoded:")
+    print(encoder.strategy_to_display_string(decoded))

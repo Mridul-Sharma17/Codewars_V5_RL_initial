@@ -8,11 +8,22 @@ import tempfile
 import shutil
 from pathlib import Path
 import queue
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import copy
+import random
+
+# Set environment variables for truly headless mode
+# These must be set before any pygame imports
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
+os.environ['SDL_AUDIODRIVER'] = 'dummy'
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+os.environ['SDL_VIDEODISABLE'] = '1'
 
 class GameRunner:
-    """Handles running games between different strategies and collecting results"""
+    """Handles running games between different strategies and collecting results with parallel processing"""
     
-    def __init__(self, game_path="game", headless=True, speed_multiplier=100000):
+    def __init__(self, game_path="game", headless=True, speed_multiplier=100000, max_workers=8):
         """
         Initialize the game runner
         
@@ -20,11 +31,15 @@ class GameRunner:
             game_path: Path to the game directory
             headless: Whether to run in headless mode (no graphics)
             speed_multiplier: How much to speed up the game (higher = faster)
+            max_workers: Maximum number of parallel processes to use
         """
         self.game_path = game_path
         self.headless = headless
         self.speed_multiplier = speed_multiplier
         self.result_queue = queue.Queue()
+        self.max_workers = min(multiprocessing.cpu_count(), max_workers)
+        
+        print(f"Initializing GameRunner with {self.max_workers} parallel workers")
         
         # Ensure game directory exists
         if not os.path.exists(game_path):
@@ -43,117 +58,71 @@ class GameRunner:
             shutil.copy(config_path, backup_path)
             print(f"Created backup of original config file: {backup_path}")
     
-    def prepare_game(self, team1_path, team2_path):
+    def prepare_game_files(self, team1_path, team2_path, work_dir=None):
         """
-        Prepare the game for a battle between two teams
+        Prepare the game files for a battle between two teams
         
         Args:
             team1_path: Path to team 1's script
             team2_path: Path to team 2's script
-        """
-        # Copy team files to the game's teams directory
-        teams_dir = os.path.join(self.game_path, "teams")
-        if not os.path.exists(teams_dir):
-            os.makedirs(teams_dir)
+            work_dir: Working directory for this battle (for parallel processing)
             
-        # Copy helper_function.py if it doesn't already exist in teams directory
+        Returns:
+            Dictionary with paths to prepared files
+        """
+        # Use temporary directory if none provided
+        if work_dir is None:
+            work_dir = tempfile.mkdtemp()
+            
+        # Create teams directory
+        teams_dir = os.path.join(work_dir, "teams")
+        os.makedirs(teams_dir, exist_ok=True)
+            
+        # Copy helper_function.py if needed
         helper_path = os.path.join(teams_dir, "helper_function.py")
         if not os.path.exists(helper_path):
-            # Look for helper_function.py in the current directory or parent directories
-            for dir_path in [os.path.dirname(team1_path), ".", ".."]:
+            # Look for helper_function.py in various locations
+            for dir_path in [os.path.dirname(team1_path), ".", "..", "teams"]:
                 source_path = os.path.join(dir_path, "helper_function.py")
                 if os.path.exists(source_path):
                     shutil.copy(source_path, helper_path)
-                    print(f"Copied helper_function.py to {helper_path}")
                     break
-                    
+        
         # Copy team scripts to a.py and b.py
         shutil.copy(team1_path, os.path.join(teams_dir, "a.py"))
         shutil.copy(team2_path, os.path.join(teams_dir, "b.py"))
-        print(f"Team files copied: {os.path.basename(team1_path)} -> a.py, {os.path.basename(team2_path)} -> b.py")
         
-        # Update config.py to use these teams
-        self._update_config()
-        
-    def _update_config(self):
-        """Update the game's config.py file to use our teams"""
-        config_path = os.path.join(self.game_path, "config.py")
+        # Create config.py
+        config_path = os.path.join(work_dir, "config.py")
         with open(config_path, 'w') as f:
             f.write("from teams import a,b\n\n")
             f.write("TEAM1 = a\n")
             f.write("TEAM2 = b\n")
             f.write("VALUE_ERROR = False\n")
-            # Add headless mode indicator
             if self.headless:
                 f.write("HEADLESS_MODE = True\n")
-        print("Updated config.py to use our teams")
         
-    def _restore_config(self):
-        """Restore the original config.py from backup"""
-        backup_path = os.path.join(self.game_path, "config_backup.py")
-        config_path = os.path.join(self.game_path, "config.py")
-        if os.path.exists(backup_path):
-            shutil.copy(backup_path, config_path)
-            print("Restored original config.py")
-    
-    def _run_game_process(self):
-        """Run the game in a separate process and monitor for results"""
-        # Create a modified version of main.py that will output results
-        self._create_instrumented_main()
+        # Create instrumented main.py
+        main_path = os.path.join(work_dir, "instrumented_main.py")
+        self._create_instrumented_main(main_path)
         
-        # Change to game directory
-        original_dir = os.getcwd()
-        os.chdir(self.game_path)
+        return {
+            "work_dir": work_dir,
+            "config_path": config_path,
+            "main_path": main_path,
+            "teams_dir": teams_dir,
+            "team1_path": team1_path,
+            "team2_path": team2_path
+        }
         
-        try:
-            # Set environment variables for headless mode
-            env = os.environ.copy()
-            if self.headless:
-                # This completely disables all display functionality
-                env["SDL_VIDEODRIVER"] = "dummy"
-                env["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
-                # Additional env vars to ensure no display is used
-                env["SDL_AUDIODRIVER"] = "dummy"
-                
-            # Run the instrumented main.py
-            cmd = [sys.executable, "instrumented_main.py"]
-            
-            # Start the process with modified environment
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env
-            )
-            
-            # Wait for process to complete
-            stdout, stderr = process.communicate()
-            
-            # Check for errors
-            if process.returncode != 0:
-                print(f"Game process failed with return code {process.returncode}")
-                print(f"Error: {stderr}")
-                return None
-                
-            # Parse the results from stdout
-            result = self._parse_results(stdout)
-            return result
-            
-        finally:
-            # Clean up
-            if os.path.exists("instrumented_main.py"):
-                os.remove("instrumented_main.py")
-            os.chdir(original_dir)
-    
-    def _create_instrumented_main(self):
+    def _create_instrumented_main(self, output_path):
         """Create a modified main.py that outputs game results"""
         # Read the original main.py
         with open(os.path.join(self.game_path, "main.py"), 'r') as f:
             main_code = f.read()
             
         # Create the instrumented version
-        with open(os.path.join(self.game_path, "instrumented_main.py"), 'w') as f:
+        with open(output_path, 'w') as f:
             # Add imports and headless mode setup at the top
             f.write("import os\n")
             f.write("import json\n")
@@ -165,7 +134,8 @@ class GameRunner:
                 f.write("# Configure pygame for headless operation before import\n")
                 f.write("os.environ['SDL_VIDEODRIVER'] = 'dummy'\n")
                 f.write("os.environ['SDL_AUDIODRIVER'] = 'dummy'\n")
-                f.write("os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'\n\n")
+                f.write("os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'\n")
+                f.write("os.environ['SDL_VIDEODISABLE'] = '1'\n\n")
             
             f.write("from scripts.game_config import *\n\n")
             
@@ -188,7 +158,7 @@ class GameRunner:
                 f.write("def headless_simulation(game):\n")
                 f.write("    \"\"\"Run the game simulation without any rendering\"\"\"\n")
                 f.write("    # Set game speed very high for fastest simulation\n")
-                f.write("    game.fps = 100000\n\n")
+                f.write(f"    game.fps = {self.speed_multiplier}\n\n")
                 f.write("    # Run game for a maximum number of frames\n")
                 f.write("    game_end_time = 1830  # Default game end time\n")
                 f.write("    if 'GAME_END_TIME' in globals():\n")
@@ -231,7 +201,7 @@ if team1_test_pass and team2_test_pass:
             # Set game speed higher
             game.fps = 1000
             
-            # Run game for a maximum number of frames
+            # Run game
             game_end_time = 1830  # Default
             if 'GAME_END_TIME' in globals():
                 game_end_time = GAME_END_TIME
@@ -270,6 +240,74 @@ if team1_test_pass and team2_test_pass:
             
             f.write(modified_code)
     
+    def _run_game_process(self, game_files):
+        """
+        Run the game in a separate process and monitor for results
+        
+        Args:
+            game_files: Dictionary with file paths
+            
+        Returns:
+            Game results dictionary
+        """
+        # Change to work directory
+        original_dir = os.getcwd()
+        os.chdir(game_files["work_dir"])
+        
+        try:
+            # Set environment variables for headless mode
+            env = os.environ.copy()
+            if self.headless:
+                # This completely disables all display functionality
+                env["SDL_VIDEODRIVER"] = "dummy"
+                env["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
+                # Additional env vars to ensure no display is used
+                env["SDL_AUDIODRIVER"] = "dummy"
+                env["SDL_VIDEODISABLE"] = "1"
+                
+            # Run the instrumented main.py
+            cmd = [sys.executable, "instrumented_main.py"]
+            
+            # Start the process with modified environment
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env
+            )
+            
+            # Wait for process to complete
+            stdout, stderr = process.communicate()
+            
+            # Check for errors
+            if process.returncode != 0:
+                print(f"Game process failed with return code {process.returncode}")
+                print(f"Error: {stderr}")
+                return None
+                
+            # Parse the results from stdout
+            result = self._parse_results(stdout)
+            
+            # Add additional metadata
+            if result:
+                result["team1_file"] = os.path.basename(game_files["team1_path"])
+                result["team2_file"] = os.path.basename(game_files["team2_path"])
+                result["timestamp"] = time.time()
+                
+                team1_win = result["winner"] == result["team1_name"]
+                team2_win = result["winner"] == result["team2_name"]
+                
+                result["team1_win"] = 1 if team1_win else 0
+                result["team2_win"] = 1 if team2_win else 0
+            
+            return result
+            
+        finally:
+            # Clean up
+            os.chdir(original_dir)
+            # Don't remove work_dir yet if it's shared among processes
+    
     def _parse_results(self, stdout):
         """Parse game results from the stdout of the game process"""
         for line in stdout.splitlines():
@@ -284,10 +322,10 @@ if team1_test_pass and team2_test_pass:
         
         print("No game results found in output")
         return None
-    
+
     def run_battle(self, team1_path, team2_path):
         """
-        Run a battle between two teams and return the results
+        Run a single battle between two teams and return the results
         
         Args:
             team1_path: Path to team 1's script
@@ -296,37 +334,103 @@ if team1_test_pass and team2_test_pass:
         Returns:
             Dictionary with battle results
         """
+        # Create a temporary directory for this battle
+        work_dir = tempfile.mkdtemp()
+        
         try:
-            # Prepare the game
-            self.prepare_game(team1_path, team2_path)
-            
-            # Run the game
-            results = self._run_game_process()
+            game_files = self.prepare_game_files(team1_path, team2_path, work_dir)
+            results = self._run_game_process(game_files)
             
             if results:
-                # Add additional metadata
-                results["team1_file"] = os.path.basename(team1_path)
-                results["team2_file"] = os.path.basename(team2_path)
-                results["timestamp"] = time.time()
-                
-                team1_win = results["winner"] == results["team1_name"]
-                team2_win = results["winner"] == results["team2_name"]
-                
-                results["team1_win"] = 1 if team1_win else 0
-                results["team2_win"] = 1 if team2_win else 0
-                
                 print(f"Battle completed: {results['team1_name']} vs {results['team2_name']}")
                 print(f"Winner: {results['winner']}")
                 
             return results
             
         finally:
-            # Clean up
-            self._restore_config()
+            # Clean up temp directory
+            shutil.rmtree(work_dir, ignore_errors=True)
+    
+    def _battle_worker(self, team1_path, team2_path):
+        """
+        Worker function to run a battle in a separate process
+        
+        Args:
+            team1_path: Path to team 1's script
+            team2_path: Path to team 2's script
+            
+        Returns:
+            Tuple of (battle_info, results)
+        """
+        battle_info = {
+            "team1": os.path.basename(team1_path),
+            "team2": os.path.basename(team2_path),
+        }
+        
+        try:
+            results = self.run_battle(team1_path, team2_path)
+            return battle_info, results
+        except Exception as e:
+            print(f"Error in battle worker: {e}")
+            return battle_info, None
+    
+    def run_parallel_battles(self, battle_pairs):
+        """Run multiple battles in parallel using threading instead of multiprocessing"""
+        results = []
+        total_battles = len(battle_pairs)
+        completed = 0
+        
+        # Create a thread-safe queue for results
+        from queue import Queue
+        result_queue = Queue()
+        
+        # Define a worker function that doesn't try to return values directly
+        def worker(team1_path, team2_path, queue):
+            try:
+                # Run the battle
+                result = self.run_battle(team1_path, team2_path)
+                # Put the result in the queue
+                queue.put(result)
+            except Exception as e:
+                print(f"Battle error: {str(e)}")
+                queue.put(None)
+        
+        # Use threading instead of multiprocessing
+        import threading
+        threads = []
+        
+        # Create and start threads for each battle pair
+        for team1_path, team2_path in battle_pairs:
+            thread = threading.Thread(
+                target=worker,
+                args=(team1_path, team2_path, result_queue)
+            )
+            threads.append(thread)
+            thread.start()
+            
+            # Limit concurrency to the number of workers
+            if len(threads) >= self.max_workers:
+                # Wait for a thread to complete before starting more
+                threads[0].join()
+                threads.pop(0)
+        
+        # Wait for all remaining threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Collect all results from the queue
+        while not result_queue.empty():
+            result = result_queue.get()
+            if result is not None:  # Skip failed battles
+                results.append(result)
+                completed += 1
+        
+        print(f"Completed {completed}/{total_battles} battles")
+        return results
     
     def run_tournament(self, team_files, matches_per_pair=1, output_file=None):
         """
-        Run a tournament between multiple teams
+        Run a tournament between multiple teams, using parallel processing
         
         Args:
             team_files: List of paths to team script files
@@ -348,13 +452,17 @@ if team1_test_pass and team2_test_pass:
         
         print(f"Running tournament with {len(team_pairs)} matches")
         
-        # Run battles for each pair
-        for i, (team1, team2) in enumerate(team_pairs):
-            print(f"Match {i+1}/{len(team_pairs)}: {os.path.basename(team1)} vs {os.path.basename(team2)}")
-            result = self.run_battle(team1, team2)
-            if result:
-                all_results.append(result)
-                
+        # Split battles into batches for parallel processing
+        batch_size = self.max_workers * 2  # Process 2 rounds of battles per batch
+        
+        for i in range(0, len(team_pairs), batch_size):
+            batch = team_pairs[i:i+batch_size]
+            print(f"Processing batch {i//batch_size + 1}/{(len(team_pairs) + batch_size - 1)//batch_size}")
+            
+            # Run this batch of battles in parallel
+            batch_results = self.run_parallel_battles(batch)
+            all_results.extend(batch_results)
+            
             # Save intermediate results
             if output_file and all_results:
                 with open(output_file, 'w') as f:

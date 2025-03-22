@@ -1,289 +1,353 @@
 """
-Battle simulator for tower defense reinforcement learning system.
-Simulates battles between strategies to determine their effectiveness.
+Tower Defense RL - Battle Simulator
+
+This module handles running battles between different strategies.
 """
 
 import os
 import sys
-import json
-import random
-import subprocess
-import tempfile
 import time
-from typing import Dict, List, Any, Tuple, Optional
 import logging
+import copy
+import random
+import uuid
+import importlib.util
+import shutil
+from typing import Dict, List, Tuple, Any
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("training_data/battle_simulator.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("BattleSimulator")
+from config import *
+
+logger = logging.getLogger('battle_simulator')
 
 class BattleSimulator:
-    """
-    Simulates battles between tower defense strategies to evaluate their performance.
-    """
+    """Runs battles between tower defense strategies."""
     
-    def __init__(self, game_executable="./battle_simulator"):
+    def __init__(self):
+        """Initialize the battle simulator."""
+        self.game_config_path = os.path.join(GAME_DIR, "config.py")
+        self.game_main_path = os.path.join(GAME_DIR, "main.py")
+        self.backup_config_path = os.path.join(TEMP_DIR, "config.py.bak")
+        self.temp_dir = TEMP_DIR
+        
+        # Create backup of original config if it doesn't exist
+        if not os.path.exists(self.backup_config_path):
+            shutil.copy(self.game_config_path, self.backup_config_path)
+    
+    def run_tournament(self, strategies: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """
-        Initialize the battle simulator.
+        Run a round-robin tournament between all strategies.
         
         Args:
-            game_executable: Path to the game executable
-        """
-        self.game_executable = game_executable
-        self.strategy_dir = "teams"
-        self.temp_dir = "temp_strategies"
-        self.visualize = False
-        self.battle_timeout = 300  # Maximum seconds per battle
-        
-        # Ensure temp directory exists
-        os.makedirs(self.temp_dir, exist_ok=True)
-        os.makedirs("training_data", exist_ok=True)
-    
-    def run_battles(self, 
-                   strategies: Dict[str, Any], 
-                   strategy_generator,
-                   num_battles: int, 
-                   tournament_style: bool = False) -> List[Dict[str, Any]]:
-        """
-        Run a series of battles between strategies.
-        
-        Args:
-            strategies: Dictionary of strategies to battle
-            strategy_generator: Generator to produce strategy code
-            num_battles: Number of battles to run
-            tournament_style: Whether to use tournament-style matchups
+            strategies: Dictionary of strategy_id -> strategy_data
             
         Returns:
-            List of battle results
+            Dictionary of battle_id -> battle_data
         """
-        # Generate all needed strategy files
-        self._generate_strategy_files(strategies, strategy_generator)
+        # Prepare a list of strategies that will participate in the tournament
+        participants = [s for s_id, s in strategies.items()]
+        logger.info(f"Running tournament with {len(participants)} strategies")
         
-        # Generate battle pairings
-        battle_pairs = self._generate_battle_pairs(strategies, num_battles, tournament_style)
+        # Prepare results dictionary
+        battle_results = {}
         
-        # Run battles
-        battle_results = []
+        # Run all possible pairings
+        battle_counter = 0
+        total_battles = len(participants) * (len(participants) - 1)
         
-        for i, (strategy_a_id, strategy_b_id) in enumerate(battle_pairs):
-            logger.info(f"Running battle {i+1}/{len(battle_pairs)}: {strategy_a_id} vs {strategy_b_id}")
-            
-            result = self._run_battle(strategy_a_id, strategy_b_id)
-            
-            if result:
-                battle_results.append(result)
-                logger.info(f"Battle result: {result['winner']} defeated {result['loser']} "
-                           f"with {result['winner_tower_health']} health remaining")
-            else:
-                logger.warning(f"Battle failed: {strategy_a_id} vs {strategy_b_id}")
+        for i, strategy1 in enumerate(participants):
+            for j, strategy2 in enumerate(participants):
+                if i == j:  # Skip battles against self
+                    continue
+                
+                battle_counter += 1
+                logger.info(f"Battle {battle_counter}/{total_battles}: {strategy1['name']} vs {strategy2['name']}")
+                
+                # Run the battle
+                battle_id = f"battle_{uuid.uuid4().hex}"
+                result = self._run_battle(strategy1, strategy2)
+                
+                # Store the result
+                battle_results[battle_id] = {
+                    "battle_id": battle_id,
+                    "strategy1_id": strategy1["id"],
+                    "strategy2_id": strategy2["id"],
+                    "winner_id": result["winner_id"],
+                    "loser_id": result["loser_id"],
+                    "strategy1_health": result["strategy1_health"],
+                    "strategy2_health": result["strategy2_health"],
+                    "timestamp": result["timestamp"]
+                }
+                
+                # Update strategy metrics
+                if strategy1["id"] == result["winner_id"]:
+                    strategies[strategy1["id"]]["metrics"]["wins"] += 1
+                    strategies[strategy2["id"]]["metrics"]["losses"] += 1
+                elif strategy2["id"] == result["winner_id"]:
+                    strategies[strategy2["id"]]["metrics"]["wins"] += 1
+                    strategies[strategy1["id"]]["metrics"]["losses"] += 1
+                
+                strategies[strategy1["id"]]["metrics"]["games_played"] += 1
+                strategies[strategy2["id"]]["metrics"]["games_played"] += 1
+                
+                # Update average tower health
+                if result["strategy1_health"] is not None:
+                    current_avg = strategies[strategy1["id"]]["metrics"]["avg_tower_health"]
+                    games_played = strategies[strategy1["id"]]["metrics"]["games_played"]
+                    strategies[strategy1["id"]]["metrics"]["avg_tower_health"] = (
+                        (current_avg * (games_played - 1) + result["strategy1_health"]) / games_played
+                    )
+                
+                if result["strategy2_health"] is not None:
+                    current_avg = strategies[strategy2["id"]]["metrics"]["avg_tower_health"]
+                    games_played = strategies[strategy2["id"]]["metrics"]["games_played"]
+                    strategies[strategy2["id"]]["metrics"]["avg_tower_health"] = (
+                        (current_avg * (games_played - 1) + result["strategy2_health"]) / games_played
+                    )
+                
+                # Update win rate
+                for s_id in [strategy1["id"], strategy2["id"]]:
+                    wins = strategies[s_id]["metrics"]["wins"]
+                    games = strategies[s_id]["metrics"]["games_played"]
+                    strategies[s_id]["metrics"]["win_rate"] = wins / games if games > 0 else 0
         
-        # Clean up temporary files
-        self._cleanup_temp_files()
-        
+        logger.info(f"Tournament completed. {len(battle_results)} battles run.")
         return battle_results
     
-    def _generate_strategy_files(self, strategies: Dict[str, Any], strategy_generator):
-        """
-        Generate Python files for all strategies.
-        
-        Args:
-            strategies: Dictionary of strategies to generate files for
-            strategy_generator: Generator to produce strategy code
-        """
-        for strategy_id, strategy in strategies.items():
-            try:
-                # Generate strategy code
-                strategy_code = strategy_generator.generate_strategy_code(strategy)
-                
-                # Save to file
-                file_path = os.path.join(self.temp_dir, f"{strategy_id}.py")
-                with open(file_path, "w") as f:
-                    f.write(strategy_code)
-                    
-                logger.debug(f"Generated strategy file for {strategy_id}")
-            except Exception as e:
-                logger.error(f"Error generating strategy file for {strategy_id}: {e}")
-    
-    def _generate_battle_pairs(self, 
-                              strategies: Dict[str, Any], 
-                              num_battles: int,
-                              tournament_style: bool) -> List[Tuple[str, str]]:
-        """
-        Generate pairs of strategies to battle.
-        
-        Args:
-            strategies: Dictionary of strategies
-            num_battles: Number of battles to generate
-            tournament_style: Whether to use tournament-style matchups
-            
-        Returns:
-            List of (strategy_a_id, strategy_b_id) tuples
-        """
-        strategy_ids = list(strategies.keys())
-        
-        if len(strategy_ids) < 2:
-            logger.error("Not enough strategies to battle")
-            return []
-        
-        battle_pairs = []
-        
-        if tournament_style:
-            # Tournament style - each strategy battles each other strategy
-            for i in range(len(strategy_ids)):
-                for j in range(i + 1, len(strategy_ids)):
-                    battle_pairs.append((strategy_ids[i], strategy_ids[j]))
-                    
-            # If we need more battles than the full tournament, repeat some matchups
-            if len(battle_pairs) < num_battles:
-                additional_pairs = []
-                while len(additional_pairs) + len(battle_pairs) < num_battles:
-                    # Random matchups for additional battles
-                    i, j = random.sample(range(len(strategy_ids)), 2)
-                    additional_pairs.append((strategy_ids[i], strategy_ids[j]))
-                
-                battle_pairs.extend(additional_pairs)
-        else:
-            # Random matchups
-            while len(battle_pairs) < num_battles:
-                # Try to ensure each strategy gets battled at least once
-                unused_strategies = [s for s in strategy_ids if not any(s in pair for pair in battle_pairs)]
-                
-                if len(unused_strategies) >= 2:
-                    # Pair two unused strategies
-                    i, j = random.sample(range(len(unused_strategies)), 2)
-                    battle_pairs.append((unused_strategies[i], unused_strategies[j]))
-                elif len(unused_strategies) == 1:
-                    # Pair the remaining unused strategy with a random one
-                    unused = unused_strategies[0]
-                    other = random.choice([s for s in strategy_ids if s != unused])
-                    battle_pairs.append((unused, other))
-                else:
-                    # All strategies used, create random pairs
-                    i, j = random.sample(range(len(strategy_ids)), 2)
-                    battle_pairs.append((strategy_ids[i], strategy_ids[j]))
-        
-        # Trim to requested number of battles
-        return battle_pairs[:num_battles]
-    
-    def _run_battle(self, strategy_a_id: str, strategy_b_id: str) -> Optional[Dict[str, Any]]:
+    def _run_battle(self, strategy1: Dict[str, Any], strategy2: Dict[str, Any]) -> Dict[str, Any]:
         """
         Run a battle between two strategies.
         
         Args:
-            strategy_a_id: ID of first strategy
-            strategy_b_id: ID of second strategy
+            strategy1: First strategy data
+            strategy2: Second strategy data
             
         Returns:
-            Battle result dictionary or None if battle failed
+            Battle result data
         """
-        # Prepare paths to strategy files
-        strategy_a_path = os.path.join(self.temp_dir, f"{strategy_a_id}.py")
-        strategy_b_path = os.path.join(self.temp_dir, f"{strategy_b_id}.py")
+        # Create temporary copies of strategies if needed
+        strategy1_path = self._prepare_strategy_file(strategy1)
+        strategy2_path = self._prepare_strategy_file(strategy2)
         
-        # Check if strategy files exist
-        if not os.path.exists(strategy_a_path) or not os.path.exists(strategy_b_path):
-            logger.error(f"Strategy files not found: {strategy_a_path} or {strategy_b_path}")
-            return None
+        # Modify game config to use these strategies
+        self._update_game_config(strategy1_path, strategy2_path)
         
-        # Create temporary results file
-        with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as temp_file:
-            results_path = temp_file.name
+        # Run the game
+        winner, strategy1_health, strategy2_health = self._run_game()
+        
+        # Determine winner and loser IDs
+        if winner == 1:
+            winner_id = strategy1["id"]
+            loser_id = strategy2["id"]
+        elif winner == 2:
+            winner_id = strategy2["id"]
+            loser_id = strategy1["id"]
+        else:  # Tie
+            winner_id = None
+            loser_id = None
+        
+        # Clean up
+        self._restore_game_config()
+        
+        return {
+            "winner_id": winner_id,
+            "loser_id": loser_id,
+            "strategy1_health": strategy1_health,
+            "strategy2_health": strategy2_health,
+            "timestamp": time.time()
+        }
+    
+    def _prepare_strategy_file(self, strategy: Dict[str, Any]) -> str:
+        """
+        Prepare a strategy file for battle.
+        
+        If the strategy has a source_file, just return that path.
+        Otherwise, generate a temporary file.
+        
+        Args:
+            strategy: Strategy data
+            
+        Returns:
+            Path to the strategy file
+        """
+        if "source_file" in strategy and os.path.exists(strategy["source_file"]):
+            return strategy["source_file"]
+        
+        # Should never happen, but just in case
+        logger.warning(f"Strategy {strategy['id']} has no source file. Generating temporary file.")
+        return self._generate_temporary_strategy_file(strategy)
+    
+    def _generate_temporary_strategy_file(self, strategy: Dict[str, Any]) -> str:
+        """Generate a temporary strategy file."""
+        # This should only happen if something went wrong with strategy generation
+        from adaptive_templates import AdaptiveTemplates
+        templates = AdaptiveTemplates()
+        
+        # Generate code
+        code = templates.generate_strategy_code(
+            strategy["template_type"], 
+            strategy["parameters"],
+            strategy["name"]
+        )
+        
+        # Write to temporary file
+        temp_file = os.path.join(TEMP_DIR, f"{strategy['id']}.py")
+        with open(temp_file, 'w') as f:
+            f.write(code)
+        
+        return temp_file
+    
+    def _update_game_config(self, strategy1_path: str, strategy2_path: str) -> None:
+        """
+        Update game config to use specific strategies.
+        
+        Args:
+            strategy1_path: Path to first strategy file
+            strategy2_path: Path to second strategy file
+        """
+        # Get module names from file paths
+        strategy1_module = os.path.splitext(os.path.basename(strategy1_path))[0]
+        strategy2_module = os.path.splitext(os.path.basename(strategy2_path))[0]
+        
+        # Get directory containing the strategy files
+        strategy1_dir = os.path.dirname(strategy1_path)
+        strategy2_dir = os.path.dirname(strategy2_path)
+        
+        # Add these directories to Python path if they're not already there
+        for directory in [strategy1_dir, strategy2_dir]:
+            if directory not in sys.path:
+                sys.path.append(directory)
+        
+        # Create new config content
+        config_content = f"""import sys
+import os
+
+# Add strategy directories to path
+sys.path.append(r"{strategy1_dir}")
+sys.path.append(r"{strategy2_dir}")
+
+# Import strategy modules
+from {strategy1_module} import *
+from {strategy2_module} import *
+
+TEAM1 = {strategy1_module}
+TEAM2 = {strategy2_module}
+VALUE_ERROR = False
+"""
+        
+        # Write to config file
+        with open(self.game_config_path, 'w') as f:
+            f.write(config_content)
+    
+    def _restore_game_config(self) -> None:
+        """Restore original game config."""
+        shutil.copy(self.backup_config_path, self.game_config_path)
+    
+    def _run_game(self) -> Tuple[int, float, float]:
+        """
+        Run the game and return the winner.
+        
+        Returns:
+            Tuple of (winner, strategy1_health, strategy2_health)
+            winner: 1 for strategy1, 2 for strategy2, 0 for tie
+        """
+        # Path manipulation to correctly import the game modules
+        original_path = sys.path.copy()
+        
+        # Add the game directory to path
+        if GAME_DIR not in sys.path:
+            sys.path.insert(0, GAME_DIR)
+        
+        # Get the parent directory of the game directory
+        parent_dir = os.path.dirname(GAME_DIR)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
         
         try:
-            # Build command to run battle
-            cmd = [
-                self.game_executable,
-                "--team1", strategy_a_path,
-                "--team2", strategy_b_path,
-                "--results", results_path,
-                "--headless", "true" if not self.visualize else "false",
-                "--fast-forward", "true"
-            ]
+            # Import the game modules properly
+            spec = importlib.util.spec_from_file_location("game_main", self.game_main_path)
+            game_main = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(game_main)
             
-            # Run the battle process with timeout
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # Define constants for the game
+            GAME_START_TIME = 0
+            GAME_END_TIME = 3600
             
-            try:
-                stdout, stderr = process.communicate(timeout=self.battle_timeout)
+            # Modified version of the game's main function that returns battle result
+            def modified_main():
+                # Import the required modules from the game
+                sys.path.insert(0, GAME_DIR)
+                from game.game import Game
                 
-                # Check for errors
-                if process.returncode != 0:
-                    logger.error(f"Battle process failed with code {process.returncode}")
-                    logger.error(f"Stderr: {stderr.decode('utf-8', errors='ignore')}")
-                    return None
+                # Get the teams from config
+                from game.config import TEAM1, TEAM2
                 
-            except subprocess.TimeoutExpired:
-                logger.error(f"Battle timed out after {self.battle_timeout} seconds")
-                process.kill()
-                return None
+                # Validate teams
+                team1_valid = game_main.validate_module(TEAM1, "TEAM 1")
+                team2_valid = game_main.validate_module(TEAM2, "TEAM 2")
+                
+                if not (team1_valid and team2_valid):
+                    return 0, 0, 0  # Tie due to validation failure
+                
+                # Create game instance
+                game = Game(TEAM1.troops, TEAM2.troops, TEAM1.team_name, TEAM2.team_name)
+                
+                # Run the game silently (no UI)
+                winner, team1_health, team2_health = run_headless_game(game)
+                
+                return winner, team1_health, team2_health
             
-            # Parse battle results
-            try:
-                with open(results_path, 'r') as f:
-                    results = json.load(f)
+            def run_headless_game(game):
+                """Run the game without UI and return the winner."""
+                # Initialize variables
+                game_counter = 0
+                tower1_health = game.tower1.health
+                tower2_health = game.tower2.health
                 
-                # Determine winner and loser
-                winner_id = None
-                loser_id = None
-                winner_tower_health = 0
-                loser_tower_health = 0
+                # Run game loop
+                while game_counter < GAME_END_TIME and tower1_health > 0 and tower2_health > 0:
+                    # Update game state
+                    if GAME_END_TIME > game_counter >= GAME_START_TIME:
+                        # Provide data to teams
+                        game.data_provided1 = {}
+                        game.data_provided2 = {}
+                        
+                        # Create dummy objects for troops and towers
+                        from game.scripts.dataflow import DataFlow
+                        DataFlow.provide_data(game)
+                        
+                        # Get deployment decisions
+                        DataFlow.deployment(game)
+                        
+                        # Update game state
+                        DataFlow.attack_die(game)
+                    
+                    # Update counter and health
+                    game_counter += 1
+                    tower1_health = game.tower1.health
+                    tower2_health = game.tower2.health
                 
-                if results["team1_won"]:
-                    winner_id = strategy_a_id
-                    loser_id = strategy_b_id
-                    winner_tower_health = results["team1_tower_health"]
-                    loser_tower_health = results["team2_tower_health"]
+                # Determine winner
+                if tower1_health <= 0 and tower2_health <= 0:
+                    return 0, 0, 0  # Tie
+                elif tower1_health <= 0:
+                    return 2, 0, tower2_health  # Team 2 wins
+                elif tower2_health <= 0:
+                    return 1, tower1_health, 0  # Team 1 wins
+                elif tower1_health > tower2_health:
+                    return 1, tower1_health, tower2_health  # Team 1 wins (tiebreaker)
+                elif tower2_health > tower1_health:
+                    return 2, tower1_health, tower2_health  # Team 2 wins (tiebreaker)
                 else:
-                    winner_id = strategy_b_id
-                    loser_id = strategy_a_id
-                    winner_tower_health = results["team2_tower_health"]
-                    loser_tower_health = results["team1_tower_health"]
-                
-                # Create battle result object
-                battle_result = {
-                    "winner": winner_id,
-                    "loser": loser_id,
-                    "winner_tower_health": winner_tower_health,
-                    "loser_tower_health": loser_tower_health,
-                    "game_duration": results.get("game_duration", 0),
-                    "timestamp": time.time()
-                }
-                
-                return battle_result
-                
-            except (json.JSONDecodeError, FileNotFoundError) as e:
-                logger.error(f"Error parsing battle results: {e}")
-                return None
+                    return 0, tower1_health, tower2_health  # Tie
             
+            # Run the modified main function
+            try:
+                winner, strategy1_health, strategy2_health = modified_main()
+                return winner, strategy1_health, strategy2_health
+            except Exception as e:
+                logger.error(f"Error running game: {e}")
+                return 0, None, None  # Tie due to error
+        
         finally:
-            # Clean up temporary results file
-            if os.path.exists(results_path):
-                try:
-                    os.unlink(results_path)
-                except:
-                    pass
-    
-    def _cleanup_temp_files(self):
-        """Clean up temporary strategy files."""
-        try:
-            for filename in os.listdir(self.temp_dir):
-                if filename.endswith('.py'):
-                    filepath = os.path.join(self.temp_dir, filename)
-                    os.unlink(filepath)
-        except Exception as e:
-            logger.warning(f"Error cleaning up temporary files: {e}")
-    
-    def enable_visualization(self, enable: bool = True):
-        """Enable or disable battle visualization."""
-        self.visualize = enable
-    
-    def set_timeout(self, timeout_seconds: int):
-        """Set battle timeout in seconds."""
-        self.battle_timeout = max(10, timeout_seconds)
+            # Restore original path
+            sys.path = original_path

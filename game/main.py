@@ -1,4 +1,4 @@
-from game import Game
+from game.game import Game
 import inspect
 from config import TEAM1, TEAM2
 

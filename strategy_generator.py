@@ -1,648 +1,493 @@
 """
-Strategy generator for tower defense reinforcement learning system.
-Creates new strategies through genetic algorithm techniques and mutation.
+Tower Defense RL - Strategy Generator
+
+This module handles the generation of strategy files through genetic algorithms.
 """
 
+import os
 import random
-import json
-import uuid
 import copy
-import math
-from typing import Dict, List, Any, Tuple, Optional
+import uuid
+import logging
+from typing import Dict, List, Any
+
+from config import *
 from adaptive_templates import AdaptiveTemplates
 
+logger = logging.getLogger('strategy_generator')
+
 class StrategyGenerator:
-    """
-    Generates new tower defense strategies through genetic algorithms and mutation.
-    Handles strategy evolution, crossover, and mutation to discover optimal play strategies.
-    """
+    """Generates and evolves tower defense strategies."""
     
-    def __init__(self, template_type="adaptive", mutation_rate=0.25):
+    def __init__(self):
+        """Initialize the strategy generator."""
+        self.templates = AdaptiveTemplates()
+        
+    def generate_initial_strategies(self, count: int) -> Dict[str, Dict[str, Any]]:
         """
-        Initialize the strategy generator.
+        Generate initial population of strategies.
         
         Args:
-            template_type: Default strategy template type
-            mutation_rate: Probability of mutation for each parameter
-        """
-        self.template_type = template_type
-        self.mutation_rate = mutation_rate
-        self.strategy_counter = 0
-        
-        # Parameter bounds for mutation
-        self.parameter_bounds = {
-            "elixir_thresholds": {
-                "min_deploy": (3.0, 6.0),
-                "save_threshold": (5.0, 9.0),
-                "emergency_threshold": (1.0, 3.0)
-            },
-            "position_settings": {
-                "x_range": [(-30, -5), (5, 30)],  # Bounds for min and max values
-                "y_default": (30, 48),
-                "defensive_y": (15, 30)
-            },
-            "defensive_trigger": (0.3, 0.9),
-            "counter_weights": {
-                "air_vs_ground": (0.8, 2.0),
-                "splash_vs_group": (1.0, 2.5),
-                "tank_priority": (0.8, 1.8)
-            },
-            "timing_parameters": {
-                "deployment_interval": (0.8, 2.5),
-                "burst_threshold": (6, 10),
-                "patience_factor": (0.4, 1.0)
-            },
-            "phase_parameters": {
-                "early_game_threshold": (300, 700),
-                "late_game_threshold": (900, 1500),
-                "early_game_aggression": (0.1, 0.5),
-                "mid_game_aggression": (0.4, 0.8),
-                "late_game_aggression": (0.6, 1.0)
-            },
-            "memory_parameters": {
-                "memory_length": (3, 8),
-                "adaptation_rate": (0.3, 0.8)
-            }
-        }
-        
-        # Valid options for categorical parameters
-        self.categorical_options = {
-            "lane_preference": ["left", "right", "center", "split", "adaptive"],
-            "template_type": ["counter_picker", "lane_adaptor", "elixir_optimizer", 
-                             "phase_shifter", "pattern_recognition", "troop_synergy",
-                             "adaptive", "baseline"]
-        }
-        
-        # Troop ordering options
-        self.available_troops = [
-            "dragon", "wizard", "valkyrie", "musketeer",
-            "knight", "archer", "minion", "barbarian"
-        ]
-    
-    def generate_initial_population(self, size: int, base_strategies: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Generate an initial population of strategies.
-        
-        Args:
-            size: Number of strategies to generate
-            base_strategies: Existing strategies to use as a base
+            count: Number of strategies to generate
             
         Returns:
-            Dictionary of generated strategies
+            Dictionary of strategy_id -> strategy_data
         """
         strategies = {}
         
-        # Start with provided base strategies if available
-        if base_strategies:
-            strategies = copy.deepcopy(base_strategies)
-            
-        # Generate additional random strategies to reach desired size
-        additional_needed = max(0, size - len(strategies))
+        # Calculate how many of each template type to generate based on weights
+        template_counts = {}
+        remaining = count
         
-        for _ in range(additional_needed):
-            strategy_id, strategy = self.generate_random_strategy()
-            strategies[strategy_id] = strategy
-            
+        for template_type, weight in TEMPLATE_WEIGHTS.items():
+            if template_type == "counter_picker":
+                # Always include at least one counter picker strategy
+                template_counts[template_type] = max(1, int(count * weight))
+            else:
+                template_counts[template_type] = int(count * weight)
+            remaining -= template_counts[template_type]
+        
+        # Distribute any remaining strategies
+        while remaining > 0:
+            template_type = random.choice(list(TEMPLATE_WEIGHTS.keys()))
+            template_counts[template_type] += 1
+            remaining -= 1
+        
+        # Generate strategies for each template type
+        for template_type, template_count in template_counts.items():
+            for _ in range(template_count):
+                strategy_id = f"{template_type}_{uuid.uuid4().hex[:8]}"
+                
+                # Generate random parameters for this template type
+                parameters = self._generate_random_parameters(template_type)
+                
+                # Create the strategy
+                strategy = {
+                    "id": strategy_id,
+                    "name": f"{template_type.replace('_', ' ').title()} {uuid.uuid4().hex[:4]}",
+                    "template_type": template_type,
+                    "parameters": parameters,
+                    "generation": 0,
+                    "parent_ids": [],
+                    "is_static": False,
+                    "metrics": {
+                        "games_played": 0,
+                        "wins": 0,
+                        "losses": 0,
+                        "avg_tower_health": 0,
+                        "win_rate": 0.0,
+                        "wilson_score": 0.0,
+                        "elite_performance": 0.0,
+                        "versatility": 0.0
+                    }
+                }
+                
+                # Generate the strategy file
+                strategy["source_file"] = self._generate_strategy_file(strategy)
+                strategies[strategy_id] = strategy
+        
+        logger.info(f"Generated {len(strategies)} initial strategies")
         return strategies
     
-    def generate_random_strategy(self) -> Tuple[str, Dict[str, Any]]:
+    def evolve_population(
+        self, 
+        strategies: Dict[str, Dict[str, Any]], 
+        fitness_scores: Dict[str, float],
+        generation: int,
+        population_size: int,
+        elite_count: int = 2,
+        tournament_size: int = 3,
+        crossover_probability: float = 0.7,
+        mutation_rate: float = 0.3,
+        retention_rate: float = 1.0
+    ) -> Dict[str, Dict[str, Any]]:
         """
-        Generate a completely random strategy.
+        Evolve the population to produce the next generation.
         
+        Args:
+            strategies: Current population of strategies
+            fitness_scores: Fitness scores for each strategy
+            generation: Current generation number
+            population_size: Desired population size
+            elite_count: Number of top strategies to preserve unchanged
+            tournament_size: Size of tournaments for selection
+            crossover_probability: Probability of crossover vs. reproduction
+            mutation_rate: Probability of mutation for each parameter
+            retention_rate: Fraction of population to retain (culling)
+            
         Returns:
-            strategy_id, strategy_dict
+            New population of strategies
         """
-        self.strategy_counter += 1
-        strategy_id = f"gen_{self._generate_id()}"
-        
-        # Create random parameter values
-        lane_preference = random.choice(self.categorical_options["lane_preference"])
-        template_type = random.choice(self.categorical_options["template_type"])
-        
-        # Generate random parameters within bounds
-        elixir_thresholds = {
-            "min_deploy": random.uniform(*self.parameter_bounds["elixir_thresholds"]["min_deploy"]),
-            "save_threshold": random.uniform(*self.parameter_bounds["elixir_thresholds"]["save_threshold"]),
-            "emergency_threshold": random.uniform(*self.parameter_bounds["elixir_thresholds"]["emergency_threshold"])
-        }
-        
-        # Ensure logical relationship between thresholds
-        elixir_thresholds["save_threshold"] = max(
-            elixir_thresholds["save_threshold"], 
-            elixir_thresholds["min_deploy"] + 1
+        # Sort strategies by fitness score
+        sorted_strategies = sorted(
+            [s for s_id, s in strategies.items() if not s.get("is_static", False)],
+            key=lambda s: fitness_scores.get(s["id"], 0),
+            reverse=True
         )
         
-        position_settings = {
-            "x_range": [
-                random.randint(*self.parameter_bounds["position_settings"]["x_range"][0]),
-                random.randint(*self.parameter_bounds["position_settings"]["x_range"][1])
-            ],
-            "y_default": random.randint(*self.parameter_bounds["position_settings"]["y_default"]),
-            "defensive_y": random.randint(*self.parameter_bounds["position_settings"]["defensive_y"])
-        }
+        # Calculate how many to retain
+        retain_count = max(elite_count, int(len(sorted_strategies) * retention_rate))
         
-        defensive_trigger = random.uniform(*self.parameter_bounds["defensive_trigger"])
+        # Create new population
+        new_population = {}
         
-        counter_weights = {
-            "air_vs_ground": random.uniform(*self.parameter_bounds["counter_weights"]["air_vs_ground"]),
-            "splash_vs_group": random.uniform(*self.parameter_bounds["counter_weights"]["splash_vs_group"]),
-            "tank_priority": random.uniform(*self.parameter_bounds["counter_weights"]["tank_priority"])
-        }
+        # First, copy all static strategies
+        for strategy_id, strategy in strategies.items():
+            if strategy.get("is_static", False):
+                new_population[strategy_id] = copy.deepcopy(strategy)
         
-        # Generate random troop priority
-        troop_priority = self.available_troops.copy()
-        random.shuffle(troop_priority)
+        # Then add elites
+        elites = sorted_strategies[:elite_count]
+        for elite in elites:
+            if elite["id"] not in new_population:
+                new_population[elite["id"]] = copy.deepcopy(elite)
         
-        # Random timing parameters
-        timing_parameters = {
-            "deployment_interval": random.uniform(*self.parameter_bounds["timing_parameters"]["deployment_interval"]),
-            "burst_threshold": random.uniform(*self.parameter_bounds["timing_parameters"]["burst_threshold"]),
-            "patience_factor": random.uniform(*self.parameter_bounds["timing_parameters"]["patience_factor"])
-        }
+        # Calculate how many new strategies to generate
+        new_count = population_size - len(new_population)
         
-        # Random phase parameters
-        phase_parameters = {
-            "early_game_threshold": random.uniform(*self.parameter_bounds["phase_parameters"]["early_game_threshold"]),
-            "late_game_threshold": random.uniform(*self.parameter_bounds["phase_parameters"]["late_game_threshold"]),
-            "early_game_aggression": random.uniform(*self.parameter_bounds["phase_parameters"]["early_game_aggression"]),
-            "mid_game_aggression": random.uniform(*self.parameter_bounds["phase_parameters"]["mid_game_aggression"]),
-            "late_game_aggression": random.uniform(*self.parameter_bounds["phase_parameters"]["late_game_aggression"])
-        }
+        # Generate new strategies through selection, crossover and mutation
+        parents_pool = sorted_strategies[:retain_count]
         
-        # Ensure late game threshold is greater than early game threshold
-        phase_parameters["late_game_threshold"] = max(
-            phase_parameters["late_game_threshold"],
-            phase_parameters["early_game_threshold"] + 300
-        )
-        
-        # Random memory parameters for pattern recognition
-        memory_parameters = {
-            "memory_length": random.randint(*self.parameter_bounds["memory_parameters"]["memory_length"]),
-            "adaptation_rate": random.uniform(*self.parameter_bounds["memory_parameters"]["adaptation_rate"])
-        }
-        
-        # Create the strategy object
-        strategy = {
-            "id": strategy_id,
-            "name": f"gen_{self.strategy_counter}",
-            "template_type": template_type,
-            "troop_selection": self.available_troops.copy(),  # We're using all available troops
-            "lane_preference": lane_preference,
-            "elixir_thresholds": elixir_thresholds,
-            "position_settings": position_settings,
-            "defensive_trigger": defensive_trigger,
-            "counter_weights": counter_weights,
-            "timing_parameters": timing_parameters,
-            "phase_parameters": phase_parameters,
-            "memory_parameters": memory_parameters,
-            "troop_priority": troop_priority,
-            "metrics": {
+        while len(new_population) < population_size:
+            # Selection
+            parent1 = self._tournament_selection(parents_pool, fitness_scores, tournament_size)
+            
+            # Decide between crossover and reproduction
+            if random.random() < crossover_probability and len(parents_pool) > 1:
+                # Crossover
+                parent2 = self._tournament_selection(
+                    [p for p in parents_pool if p["id"] != parent1["id"]], 
+                    fitness_scores, 
+                    tournament_size
+                )
+                child = self._crossover(parent1, parent2)
+                child["parent_ids"] = [parent1["id"], parent2["id"]]
+            else:
+                # Reproduction
+                child = copy.deepcopy(parent1)
+                child["parent_ids"] = [parent1["id"]]
+            
+            # Mutation
+            self._mutate(child, mutation_rate)
+            
+            # Update child metadata
+            child_id = f"{child['template_type']}_{uuid.uuid4().hex[:8]}"
+            child["id"] = child_id
+            child["name"] = f"{child['template_type'].replace('_', ' ').title()} {uuid.uuid4().hex[:4]}"
+            child["generation"] = generation + 1
+            
+            # Reset metrics
+            child["metrics"] = {
                 "games_played": 0,
                 "wins": 0,
                 "losses": 0,
                 "avg_tower_health": 0,
-                "win_rate": 0
+                "win_rate": 0.0,
+                "wilson_score": 0.0,
+                "elite_performance": 0.0,
+                "versatility": 0.0
             }
-        }
-        
-        return strategy_id, strategy
-    
-    def evolve_population(self, 
-                         strategies: Dict[str, Any], 
-                         battle_metrics: List[Dict[str, Any]], 
-                         generation: int,
-                         population_size: int, 
-                         elite_count: int = 2,
-                         tournament_size: int = 3,
-                         min_games_for_evolution: int = 3) -> Dict[str, Any]:
-        """
-        Evolve the population based on battle results.
-        
-        Args:
-            strategies: Current generation strategies
-            battle_metrics: Results of battles
-            generation: Current generation number
-            population_size: Desired size of the evolved population
-            elite_count: Number of best strategies to preserve unchanged
-            tournament_size: Number of strategies to include in each tournament selection
-            min_games_for_evolution: Minimum number of games a strategy needs to have played
             
-        Returns:
-            Dictionary of evolved strategies
-        """
-        # Calculate fitness for each strategy
-        fitness_scores = self._calculate_fitness(strategies, battle_metrics, min_games_for_evolution)
-        
-        # Sort strategies by fitness
-        sorted_strategies = sorted(
-            fitness_scores.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )
-        
-        # Select elites (best performing strategies)
-        elites = []
-        for i in range(min(elite_count, len(sorted_strategies))):
-            if i < len(sorted_strategies):
-                elite_id = sorted_strategies[i][0]
-                elites.append(elite_id)
-        
-        # Create new population, starting with elites
-        new_population = {}
-        for elite_id in elites:
-            if elite_id in strategies:
-                new_population[elite_id] = copy.deepcopy(strategies[elite_id])
-        
-        # Fill the rest of the population through tournament selection and crossover
-        while len(new_population) < population_size:
-            # Select parents through tournament selection
-            parent1_id = self._tournament_selection(fitness_scores, tournament_size)
-            parent2_id = self._tournament_selection(fitness_scores, tournament_size)
+            # Generate the strategy file
+            child["source_file"] = self._generate_strategy_file(child)
             
-            # Make sure parents are different
-            attempts = 0
-            while parent1_id == parent2_id and attempts < 5:
-                parent2_id = self._tournament_selection(fitness_scores, tournament_size)
-                attempts += 1
-            
-            # If we couldn't find different parents, generate a random strategy
-            if parent1_id == parent2_id or parent1_id not in strategies or parent2_id not in strategies:
-                child_id, child = self.generate_random_strategy()
-                new_population[child_id] = child
-                continue
-            
-            # Create child through crossover and mutation
-            parent1 = strategies[parent1_id]
-            parent2 = strategies[parent2_id]
-            
-            child_id, child = self._crossover_and_mutate(parent1, parent2, generation)
+            # Add to population
             new_population[child_id] = child
         
-        # Add some completely random strategies to maintain diversity
-        random_count = max(1, int(population_size * 0.1))  # 10% random
-        for _ in range(random_count):
-            if len(new_population) < population_size * 1.2:  # Allow up to 20% more strategies
-                strategy_id, strategy = self.generate_random_strategy()
-                new_population[strategy_id] = strategy
-        
+        logger.info(f"Generated {len(new_population) - len(elites) - len([s for s in strategies.values() if s.get('is_static', False)])} new strategies for generation {generation + 1}")
         return new_population
     
-    def _calculate_fitness(self, 
-                          strategies: Dict[str, Any], 
-                          battle_metrics: List[Dict[str, Any]],
-                          min_games: int = 3) -> Dict[str, float]:
-        """
-        Calculate fitness scores for all strategies based on battle results.
-        
-        Args:
-            strategies: Current strategies
-            battle_metrics: Battle results
-            min_games: Minimum number of games needed for inclusion
-            
-        Returns:
-            Dictionary mapping strategy IDs to fitness scores
-        """
-        # Count wins and games for each strategy
-        wins = {}
-        games_played = {}
-        tower_health = {}
-        
-        for battle in battle_metrics:
-            winner_id = battle.get("winner")
-            loser_id = battle.get("loser")
-            
-            winner_health = battle.get("winner_tower_health", 10000)
-            loser_health = battle.get("loser_tower_health", 0)
-            
-            # Track winner stats
-            if winner_id:
-                wins[winner_id] = wins.get(winner_id, 0) + 1
-                games_played[winner_id] = games_played.get(winner_id, 0) + 1
-                # Track average tower health (weighted average)
-                if winner_id in tower_health:
-                    prev_health, prev_count = tower_health[winner_id]
-                    tower_health[winner_id] = (
-                        (prev_health * prev_count + winner_health) / (prev_count + 1),
-                        prev_count + 1
-                    )
-                else:
-                    tower_health[winner_id] = (winner_health, 1)
-            
-            # Track loser stats
-            if loser_id:
-                games_played[loser_id] = games_played.get(loser_id, 0) + 1
-                # Track average tower health (weighted average)
-                if loser_id in tower_health:
-                    prev_health, prev_count = tower_health[loser_id]
-                    tower_health[loser_id] = (
-                        (prev_health * prev_count + loser_health) / (prev_count + 1),
-                        prev_count + 1
-                    )
-                else:
-                    tower_health[loser_id] = (loser_health, 1)
-        
-        # Calculate fitness scores and update metrics
-        fitness_scores = {}
-        
-        for strategy_id, strategy in strategies.items():
-            # Get battle statistics
-            strategy_wins = wins.get(strategy_id, 0)
-            strategy_games = games_played.get(strategy_id, 0)
-            
-            # Update strategy metrics if it participated in battles
-            if strategy_games > 0:
-                # Update metrics in the strategy
-                strategy["metrics"]["games_played"] = strategy_games + strategy["metrics"].get("games_played", 0)
-                strategy["metrics"]["wins"] = strategy_wins + strategy["metrics"].get("wins", 0)
-                strategy["metrics"]["losses"] = (strategy_games - strategy_wins) + strategy["metrics"].get("losses", 0)
-                
-                # Calculate win rate
-                win_rate = strategy_wins / strategy_games if strategy_games > 0 else 0
-                strategy["metrics"]["win_rate"] = win_rate
-                
-                # Get average tower health
-                avg_health = tower_health.get(strategy_id, (0, 0))[0]
-                strategy["metrics"]["avg_tower_health"] = avg_health
-                
-                # Only include strategies with enough games
-                if strategy_games >= min_games:
-                    # Fitness is primarily win rate, with a small bonus for tower health
-                    health_factor = avg_health / 10000  # Normalize to 0-1
-                    fitness = win_rate * 0.9 + health_factor * 0.1
-                    
-                    fitness_scores[strategy_id] = fitness
-            else:
-                # If strategy hasn't played in this generation, use historical data
-                if strategy["metrics"]["games_played"] >= min_games:
-                    win_rate = strategy["metrics"].get("win_rate", 0)
-                    health_factor = strategy["metrics"].get("avg_tower_health", 0) / 10000
-                    
-                    # Apply a slight penalty for not being tested in current generation
-                    fitness = (win_rate * 0.9 + health_factor * 0.1) * 0.95
-                    fitness_scores[strategy_id] = fitness
-                else:
-                    # If strategy hasn't played enough games total, give it a neutral score
-                    fitness_scores[strategy_id] = 0.5
-        
-        return fitness_scores
+    def _generate_random_parameters(self, template_type: str) -> Dict[str, Any]:
+        """Generate random parameters for a given template type."""
+        if template_type == "counter_picker":
+            return {
+                # Troop selection parameters
+                "counter_weights": {
+                    "air": random.uniform(0.5, 3.0),
+                    "ground": random.uniform(0.5, 3.0),
+                    "splash": random.uniform(0.5, 3.0),
+                    "tank": random.uniform(0.5, 3.0),
+                    "swarm": random.uniform(0.5, 3.0)
+                },
+                "troop_to_category": {
+                    "Archer": ["ground", "ranged"],
+                    "Giant": ["ground", "tank"],
+                    "Dragon": ["air", "splash"],
+                    "Balloon": ["air", "building-targeting"],
+                    "Prince": ["ground", "tank"],
+                    "Barbarian": ["ground", "swarm"],
+                    "Knight": ["ground", "tank"],
+                    "Minion": ["air", "swarm"],
+                    "Skeleton": ["ground", "swarm"],
+                    "Wizard": ["ground", "splash"],
+                    "Valkyrie": ["ground", "splash"],
+                    "Musketeer": ["ground", "ranged"]
+                },
+                "category_counters": {
+                    "air": ["ground", "ranged"],
+                    "ground": ["air", "splash"],
+                    "tank": ["swarm", "building-targeting"],
+                    "swarm": ["splash"],
+                    "ranged": ["tank"],
+                    "splash": ["ranged", "building-targeting"],
+                    "building-targeting": ["swarm"]
+                },
+                # Deployment parameters
+                "deploy_distance": random.uniform(5, 20),
+                "air_deploy_distance": random.uniform(0, 10),
+                "ground_deploy_distance": random.uniform(0, 15),
+                "lane_preference": random.uniform(-20, 20),
+                "elixir_threshold": random.uniform(4, 8),
+                "aggressive_threshold": random.uniform(0.3, 0.7)
+            }
+        elif template_type == "resource_manager":
+            return {
+                # Elixir management parameters
+                "early_game_threshold": random.randint(30, 60),
+                "mid_game_threshold": random.randint(90, 120),
+                "early_elixir_threshold": random.uniform(5, 9),
+                "mid_elixir_threshold": random.uniform(4, 8),
+                "late_elixir_threshold": random.uniform(3, 7),
+                "elixir_advantage_threshold": random.uniform(1, 3),
+                "troop_value_coefficients": {
+                    "health": random.uniform(0.01, 0.1),
+                    "damage": random.uniform(0.1, 1.0),
+                    "speed": random.uniform(0.5, 2.0),
+                    "attack_range": random.uniform(0.2, 1.0),
+                    "splash_range": random.uniform(1.0, 3.0)
+                },
+                # Deployment positioning
+                "deploy_distance": random.uniform(5, 20),
+                "spread_factor": random.uniform(5, 20),
+                "lane_preference": random.uniform(-20, 20)
+            }
+        elif template_type == "lane_adaptor":
+            return {
+                # Lane analysis parameters
+                "lane_width": random.uniform(10, 25),
+                "lane_memory_factor": random.uniform(0.6, 0.9),
+                "lane_pressure_threshold": random.uniform(0.4, 0.8),
+                # Response parameters
+                "defensive_distance": random.uniform(10, 20),
+                "offensive_distance": random.uniform(0, 10),
+                "grouping_factor": random.uniform(0.0, 1.0),
+                "counter_deploy_ratio": random.uniform(0.5, 1.5),
+                # Troop selection
+                "troop_role_weights": {
+                    "tank": random.uniform(0.5, 2.0),
+                    "support": random.uniform(0.5, 2.0),
+                    "swarm": random.uniform(0.5, 2.0),
+                    "splasher": random.uniform(0.5, 2.0)
+                },
+                "troop_roles": {
+                    "Giant": "tank",
+                    "Knight": "tank",
+                    "Prince": "tank",
+                    "Barbarian": "swarm",
+                    "Skeleton": "swarm",
+                    "Minion": "swarm",
+                    "Wizard": "splasher",
+                    "Valkyrie": "splasher",
+                    "Dragon": "splasher",
+                    "Archer": "support",
+                    "Musketeer": "support",
+                    "Balloon": "tank"
+                }
+            }
+        elif template_type == "phase_based":
+            return {
+                # Phase definitions
+                "early_phase_end": random.randint(30, 60),
+                "mid_phase_end": random.randint(90, 150),
+                # Phase strategies
+                "early_phase_strategy": {
+                    "aggression": random.uniform(0.0, 0.5),
+                    "elixir_threshold": random.uniform(6, 10),
+                    "deploy_distance": random.uniform(10, 20),
+                    "troop_preferences": {
+                        "cheap": random.uniform(1.0, 3.0),
+                        "medium": random.uniform(0.5, 1.5),
+                        "expensive": random.uniform(0.2, 0.8)
+                    }
+                },
+                "mid_phase_strategy": {
+                    "aggression": random.uniform(0.3, 0.8),
+                    "elixir_threshold": random.uniform(4, 8),
+                    "deploy_distance": random.uniform(5, 15),
+                    "troop_preferences": {
+                        "cheap": random.uniform(0.5, 1.5),
+                        "medium": random.uniform(1.0, 2.0),
+                        "expensive": random.uniform(0.8, 1.5)
+                    }
+                },
+                "late_phase_strategy": {
+                    "aggression": random.uniform(0.6, 1.0),
+                    "elixir_threshold": random.uniform(2, 6),
+                    "deploy_distance": random.uniform(0, 10),
+                    "troop_preferences": {
+                        "cheap": random.uniform(0.2, 1.0),
+                        "medium": random.uniform(0.8, 1.5),
+                        "expensive": random.uniform(1.0, 2.0)
+                    }
+                },
+                # Troop categorization
+                "troop_costs": {
+                    "Archer": "cheap",
+                    "Barbarian": "cheap", 
+                    "Knight": "cheap",
+                    "Minion": "cheap",
+                    "Skeleton": "cheap",
+                    "Dragon": "medium",
+                    "Valkyrie": "medium",
+                    "Musketeer": "medium",
+                    "Giant": "expensive",
+                    "Prince": "expensive",
+                    "Wizard": "expensive",
+                    "Balloon": "expensive"
+                }
+            }
+        else:
+            logger.warning(f"Unknown template type: {template_type}")
+            return {}
     
-    def _tournament_selection(self, 
-                             fitness_scores: Dict[str, float], 
-                             tournament_size: int) -> str:
+    def _tournament_selection(
+        self, 
+        population: List[Dict[str, Any]], 
+        fitness_scores: Dict[str, float], 
+        tournament_size: int
+    ) -> Dict[str, Any]:
         """
         Select a strategy using tournament selection.
         
         Args:
-            fitness_scores: Mapping of strategy IDs to fitness scores
-            tournament_size: Number of strategies to include in the tournament
+            population: List of strategies to select from
+            fitness_scores: Fitness scores for each strategy
+            tournament_size: Number of strategies to include in each tournament
             
         Returns:
-            Selected strategy ID
+            The selected strategy
         """
-        if not fitness_scores:
-            return None
+        if not population:
+            raise ValueError("Cannot perform tournament selection on empty population")
         
-        # Select random candidates for the tournament
-        candidates = list(fitness_scores.keys())
-        if len(candidates) <= tournament_size:
-            tournament = candidates
-        else:
-            tournament = random.sample(candidates, tournament_size)
+        # Select random strategies for the tournament
+        tournament = random.sample(population, min(tournament_size, len(population)))
         
-        # Find the best strategy in the tournament
-        best_strategy = None
-        best_fitness = -1
-        
-        for strategy_id in tournament:
-            fitness = fitness_scores.get(strategy_id, 0)
-            if fitness > best_fitness:
-                best_fitness = fitness
-                best_strategy = strategy_id
-        
-        return best_strategy
+        # Select the best strategy from the tournament
+        return max(tournament, key=lambda s: fitness_scores.get(s["id"], 0))
     
-    def _crossover_and_mutate(self, 
-                             parent1: Dict[str, Any], 
-                             parent2: Dict[str, Any],
-                             generation: int) -> Tuple[str, Dict[str, Any]]:
+    def _crossover(self, parent1: Dict[str, Any], parent2: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create a new strategy by crossing over two parent strategies and applying mutation.
+        Perform crossover between two parent strategies.
         
         Args:
             parent1: First parent strategy
             parent2: Second parent strategy
-            generation: Current generation number
             
         Returns:
-            strategy_id, new_strategy
+            Child strategy
         """
-        self.strategy_counter += 1
-        child_id = f"gen_{self._generate_id()}"
-        
-        # Create child as a copy of parent1 initially
+        # Create a deep copy of parent1 as the base for the child
         child = copy.deepcopy(parent1)
-        child["id"] = child_id
-        child["name"] = f"gen_{generation}_{self.strategy_counter}"
         
-        # Initialize new metrics
-        child["metrics"] = {
-            "games_played": 0,
-            "wins": 0,
-            "losses": 0,
-            "avg_tower_health": 0,
-            "win_rate": 0
-        }
+        # If parents are of different template types, just return a copy of the first parent
+        if parent1["template_type"] != parent2["template_type"]:
+            return child
         
-        # Crossover - randomly select properties from each parent
-        self._crossover_numeric_param(child, parent2, "defensive_trigger")
+        # Perform parameter-level crossover
+        child_params = {}
+        template_type = parent1["template_type"]
         
-        # Crossover nested parameters
-        for category in ["elixir_thresholds", "position_settings", "counter_weights", 
-                         "timing_parameters", "phase_parameters", "memory_parameters"]:
-            if category in parent1 and category in parent2:
-                if category not in child:
-                    child[category] = {}
-                    
-                for param in parent1[category]:
-                    if param in parent2[category]:
-                        # 50% chance to inherit from each parent
-                        if random.random() < 0.5:
-                            child[category][param] = copy.deepcopy(parent2[category][param])
+        for key, value in parent1["parameters"].items():
+            # For each top-level parameter, randomly choose between parents
+            if random.random() < 0.5 and key in parent2["parameters"]:
+                child_params[key] = copy.deepcopy(parent2["parameters"][key])
+            else:
+                child_params[key] = copy.deepcopy(value)
+                
+            # For dictionary parameters, we can do more granular crossover
+            if isinstance(value, dict) and isinstance(parent2["parameters"].get(key, None), dict):
+                # For each sub-parameter, randomly choose between parents
+                for subkey in value:
+                    if random.random() < 0.5 and subkey in parent2["parameters"][key]:
+                        child_params[key][subkey] = copy.deepcopy(parent2["parameters"][key][subkey])
         
-        # Crossover categorical parameters
-        for param in ["lane_preference", "template_type"]:
-            if param in parent1 and param in parent2:
-                if random.random() < 0.5:
-                    child[param] = parent2[param]
-        
-        # Crossover troop priority
-        if "troop_priority" in parent1 and "troop_priority" in parent2:
-            # Uniform crossover of troop priorities
-            child["troop_priority"] = []
-            
-            # Determine length (minimum of both parents)
-            p1_troops = parent1["troop_priority"]
-            p2_troops = parent2["troop_priority"]
-            max_length = min(len(p1_troops), len(p2_troops))
-            
-            for i in range(max_length):
-                if random.random() < 0.5 and i < len(p1_troops):
-                    troop = p1_troops[i]
-                elif i < len(p2_troops):
-                    troop = p2_troops[i]
-                else:
-                    continue
-                    
-                if troop not in child["troop_priority"]:
-                    child["troop_priority"].append(troop)
-            
-            # Add any missing troops
-            all_troops = set(self.available_troops)
-            for troop in all_troops:
-                if troop not in child["troop_priority"]:
-                    child["troop_priority"].append(troop)
-        
-        # Apply mutations
-        self._mutate_strategy(child)
-        
-        return child_id, child
+        child["parameters"] = child_params
+        return child
     
-    def _crossover_numeric_param(self, 
-                                child: Dict[str, Any], 
-                                parent2: Dict[str, Any], 
-                                param: str):
-        """Helper method for crossing over a numeric parameter."""
-        if param in child and param in parent2:
-            # 50% chance to inherit from parent2
-            if random.random() < 0.5:
-                child[param] = parent2[param]
-    
-    def _mutate_strategy(self, strategy: Dict[str, Any]):
+    def _mutate(self, strategy: Dict[str, Any], mutation_rate: float) -> None:
         """
-        Apply random mutations to a strategy.
+        Mutate a strategy in place.
         
         Args:
             strategy: Strategy to mutate
+            mutation_rate: Probability of mutation for each parameter
         """
-        # Mutate categorical parameters
-        for param, options in self.categorical_options.items():
-            if param in strategy and random.random() < self.mutation_rate:
-                strategy[param] = random.choice(options)
+        template_type = strategy["template_type"]
         
-        # Mutate numeric parameters
-        if "defensive_trigger" in strategy and random.random() < self.mutation_rate:
-            bounds = self.parameter_bounds["defensive_trigger"]
-            strategy["defensive_trigger"] = self._mutate_numeric_value(
-                strategy["defensive_trigger"], bounds[0], bounds[1]
-            )
+        # Get a fresh set of random parameters for this template type
+        random_params = self._generate_random_parameters(template_type)
         
-        # Mutate nested parameters
-        self._mutate_nested_params(strategy, "elixir_thresholds", self.parameter_bounds["elixir_thresholds"])
-        self._mutate_nested_params(strategy, "counter_weights", self.parameter_bounds["counter_weights"])
-        self._mutate_nested_params(strategy, "timing_parameters", self.parameter_bounds["timing_parameters"])
-        self._mutate_nested_params(strategy, "phase_parameters", self.parameter_bounds["phase_parameters"])
-        self._mutate_nested_params(strategy, "memory_parameters", self.parameter_bounds["memory_parameters"])
-        
-        # Special handling for position settings
-        if "position_settings" in strategy:
-            # Mutate x_range specially because it's a list
-            if "x_range" in strategy["position_settings"] and random.random() < self.mutation_rate:
-                bounds_min = self.parameter_bounds["position_settings"]["x_range"][0]
-                bounds_max = self.parameter_bounds["position_settings"]["x_range"][1]
-                
-                # Mutate min value
-                strategy["position_settings"]["x_range"][0] = int(self._mutate_numeric_value(
-                    strategy["position_settings"]["x_range"][0], bounds_min[0], bounds_min[1]
-                ))
-                
-                # Mutate max value
-                strategy["position_settings"]["x_range"][1] = int(self._mutate_numeric_value(
-                    strategy["position_settings"]["x_range"][1], bounds_max[0], bounds_max[1]
-                ))
+        # Mutate top-level parameters
+        for key, value in strategy["parameters"].items():
+            if random.random() < mutation_rate:
+                if key in random_params:
+                    strategy["parameters"][key] = random_params[key]
             
-            # Mutate other position settings
-            for param in ["y_default", "defensive_y"]:
-                if param in strategy["position_settings"] and random.random() < self.mutation_rate:
-                    bounds = self.parameter_bounds["position_settings"][param]
-                    strategy["position_settings"][param] = int(self._mutate_numeric_value(
-                        strategy["position_settings"][param], bounds[0], bounds[1]
-                    ))
-        
-        # Mutate troop priority
-        if "troop_priority" in strategy and random.random() < self.mutation_rate:
-            # Apply random swaps in the priority list
-            num_swaps = random.randint(1, 3)
-            priority_list = strategy["troop_priority"]
-            
-            for _ in range(num_swaps):
-                if len(priority_list) >= 2:
-                    i = random.randint(0, len(priority_list) - 1)
-                    j = random.randint(0, len(priority_list) - 1)
-                    priority_list[i], priority_list[j] = priority_list[j], priority_list[i]
+            # For dictionary parameters, we can do more granular mutation
+            if isinstance(value, dict):
+                for subkey in value:
+                    if random.random() < mutation_rate:
+                        if key in random_params and subkey in random_params[key]:
+                            strategy["parameters"][key][subkey] = random_params[key][subkey]
+                            
+            # For numeric parameters, we can also do small tweaks
+            if isinstance(value, (int, float)) and random.random() < mutation_rate:
+                # Apply a small random change (±20%)
+                if isinstance(value, int):
+                    delta = max(1, abs(int(value * 0.2)))
+                    strategy["parameters"][key] = max(0, value + random.randint(-delta, delta))
+                else:  # float
+                    delta = abs(value * 0.2)
+                    strategy["parameters"][key] = max(0, value + random.uniform(-delta, delta))
     
-    def _mutate_nested_params(self, strategy: Dict[str, Any], category: str, bounds: Dict[str, Any]):
-        """Helper method for mutating nested parameters."""
-        if category in strategy:
-            for param, param_bounds in bounds.items():
-                if param in strategy[category] and random.random() < self.mutation_rate:
-                    min_val, max_val = param_bounds
-                    
-                    # Integer mutation for some specific parameters
-                    if (category == "memory_parameters" and param == "memory_length" or
-                        category == "phase_parameters" and param in ["early_game_threshold", "late_game_threshold"]):
-                        strategy[category][param] = int(self._mutate_numeric_value(
-                            strategy[category][param], min_val, max_val
-                        ))
-                    else:
-                        strategy[category][param] = self._mutate_numeric_value(
-                            strategy[category][param], min_val, max_val
-                        )
-    
-    def _mutate_numeric_value(self, value: float, min_val: float, max_val: float) -> float:
+    def _generate_strategy_file(self, strategy: Dict[str, Any]) -> str:
         """
-        Mutate a numeric value within bounds.
+        Generate a strategy file for a given strategy.
         
         Args:
-            value: Current value
-            min_val: Minimum allowed value
-            max_val: Maximum allowed value
+            strategy: Strategy data
             
         Returns:
-            Mutated value
+            Path to the generated strategy file
         """
-        # Determine mutation magnitude based on parameter range
-        range_size = max_val - min_val
-        mutation_size = range_size * 0.2  # Allow mutation of up to 20% of the range
+        # Create directory for this generation if it doesn't exist
+        generation_dir = os.path.join(EVOLVED_STRATEGIES_DIR, f"generation_{strategy['generation']}")
+        os.makedirs(generation_dir, exist_ok=True)
         
-        # Apply random mutation
-        delta = random.uniform(-mutation_size, mutation_size)
-        new_value = value + delta
+        # Generate file path
+        file_path = os.path.join(generation_dir, f"{strategy['id']}.py")
         
-        # Keep within bounds
-        new_value = max(min_val, min(max_val, new_value))
+        # For static strategies, just copy the file
+        if strategy.get("is_static", False) and "source_file" in strategy:
+            if os.path.exists(strategy["source_file"]):
+                with open(strategy["source_file"], 'r') as f:
+                    content = f.read()
+                
+                with open(file_path, 'w') as f:
+                    f.write(content)
+                
+                return file_path
         
-        return new_value
-    
-    def generate_strategy_code(self, strategy: Dict[str, Any]) -> str:
-        """
-        Generate Python code for a strategy using the appropriate template.
+        # For generated strategies, use the template
+        code = self.templates.generate_strategy_code(
+            strategy["template_type"], 
+            strategy["parameters"],
+            strategy["name"]
+        )
         
-        Args:
-            strategy: Strategy parameters
-            
-        Returns:
-            Python code string for the strategy
-        """
-        # Default to adaptive template if none specified
-        template_type = strategy.get("template_type", self.template_type)
+        # Write the code to file
+        with open(file_path, 'w') as f:
+            f.write(code)
         
-        # Generate code using the appropriate template
-        strategy_code = AdaptiveTemplates.generate_template_code(template_type, strategy)
-        
-        return strategy_code
-    
-    def _generate_id(self) -> str:
-        """Generate a unique ID for a strategy."""
-        # Generate random 8-character hex ID
-        id_part = uuid.uuid4().hex[:8]
-        return id_part
+        return file_path

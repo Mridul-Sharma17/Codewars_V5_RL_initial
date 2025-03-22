@@ -89,6 +89,7 @@ class Game:
         self.main_screen.blit(self.right_screen, ((FULL_WIDTH+MIDDLE_WIDTH)//2, 0))
 
     def run(self):
+        self.fps = 100
         while True:
             self.render_game_screen()
             self.render_left_screen()
@@ -97,11 +98,11 @@ class Game:
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_UP:
-                        self.fps = min(70,self.fps+5)
-                    if event.key == pygame.K_DOWN:
-                        self.fps = max(5,self.fps - 5)
+                # if event.type == pygame.KEYDOWN:
+                #     if event.key == pygame.K_UP:
+                #         self.fps = min(70,self.fps+5)
+                #     if event.key == pygame.K_DOWN:
+                #         self.fps = max(5,self.fps - 5)
             pygame.display.update()
             self.clock.tick(self.fps)
             self.game_counter += 1

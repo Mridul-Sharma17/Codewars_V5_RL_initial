@@ -16,3 +16,40 @@
 2025-03-23 03:05:59,650 - main - INFO - Current phase: exploration, mutation rate: 0.3
 2025-03-23 03:05:59,650 - battle_simulator - INFO - Running tournament with 10 strategies
 2025-03-23 03:05:59,650 - battle_simulator - INFO - Battle 1/90: Pratyaksh vs Counter Picker c0f5
+2025-03-23 03:14:02,320 - main - INFO - Creating initial population of 10 strategies
+2025-03-23 03:14:02,322 - strategy_generator - INFO - Generated 9 initial strategies
+2025-03-23 03:14:02,322 - main - INFO - Starting generation 0
+2025-03-23 03:14:02,322 - main - INFO - Current phase: exploration, mutation rate: 0.3
+2025-03-23 03:14:02,322 - battle_simulator - INFO - Running tournament with 10 strategies
+2025-03-23 03:14:02,322 - battle_simulator - INFO - Battle 1/90: Pratyaksh vs Counter Picker 73b6
+2025-03-23 03:22:05,680 - main - INFO - Creating initial population of 10 strategies
+2025-03-23 03:22:05,682 - strategy_generator - INFO - Generated 9 initial strategies
+2025-03-23 03:22:05,682 - main - INFO - Starting generation 0
+2025-03-23 03:22:05,682 - main - INFO - Current phase: exploration, mutation rate: 0.3
+2025-03-23 03:27:03,979 - main - INFO - Creating initial population of 10 strategies
+2025-03-23 03:27:03,980 - strategy_generator - INFO - Generated 9 initial strategies
+2025-03-23 03:27:03,980 - main - INFO - Starting generation 0
+2025-03-23 03:27:03,980 - main - INFO - Current phase: exploration, mutation rate: 0.3
+2025-03-23 03:27:03,981 - battle_simulator - INFO - Running tournament with 10 strategies
+2025-03-23 03:27:03,981 - battle_simulator - INFO - Battle 1/90: Pratyaksh vs Counter Picker 6b04
+2025-03-23 03:33:10,492 - main - INFO - Creating initial population of 10 strategies
+2025-03-23 03:33:10,494 - strategy_generator - INFO - Generated 9 initial strategies
+2025-03-23 03:33:10,494 - main - INFO - Starting generation 0
+2025-03-23 03:33:10,494 - main - INFO - Current phase: exploration, mutation rate: 0.3
+2025-03-23 03:33:10,494 - battle_simulator - INFO - Running tournament with 10 strategies
+2025-03-23 03:33:10,495 - battle_simulator - INFO - Battle 1/90: Pratyaksh vs Counter Picker 9837
+2025-03-23 03:35:46,014 - main - INFO - Creating initial population of 10 strategies
+2025-03-23 03:35:46,016 - strategy_generator - INFO - Generated 9 initial strategies
+2025-03-23 03:35:46,016 - main - INFO - Starting generation 0
+2025-03-23 03:35:46,016 - main - INFO - Current phase: exploration, mutation rate: 0.3
+2025-03-23 03:35:46,016 - battle_simulator - INFO - Running tournament with 10 strategies
+2025-03-23 03:35:46,016 - battle_simulator - INFO - Battle 1/90: Pratyaksh vs Counter Picker 8392
+2025-03-23 03:35:46,193 - battle_simulator - ERROR - Error loading game_main: name 'pratyaksh' is not defined
+2025-03-23 11:54:01,700 - main - INFO - Creating initial population of 10 strategies
+2025-03-23 11:54:01,702 - strategy_generator - INFO - Generated 9 initial strategies
+2025-03-23 11:54:01,702 - main - INFO - Starting generation 0
+2025-03-23 11:54:01,702 - main - INFO - Current phase: exploration, mutation rate: 0.3
+2025-03-23 11:54:01,702 - battle_simulator - INFO - Running tournament with 10 strategies
+2025-03-23 11:54:01,702 - battle_simulator - INFO - Battle 1/90: Pratyaksh vs Counter Picker 1d8d
+2025-03-23 11:54:02,015 - battle_simulator - ERROR - Error loading game_main: name 'pratyaksh' is not defined
+2025-03-23 12:23:43,829 - main - INFO - Creating initial population of 10 strategies

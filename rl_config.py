@@ -6,7 +6,7 @@ import os
 
 # Directory Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-GAME_DIR = os.path.join(BASE_DIR, "game")
+GAME_ENGINE_DIR = os.path.join(BASE_DIR, "game_engine")
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 EVOLVED_STRATEGIES_DIR = os.path.join(BASE_DIR, "evolved_strategies")
 TRAINING_DATA_DIR = os.path.join(BASE_DIR, "training_data")
@@ -64,7 +64,7 @@ BASELINE_STRATEGIES = [
     {
         "id": "pratyaksh",
         "name": "Pratyaksh",
-        "source_file": os.path.join(GAME_DIR, "teams", "baselines", "pratyaksh.py"),
+        "source_file": os.path.join(GAME_ENGINE_DIR, "teams", "baselines", "pratyaksh.py"),
         "template_type": "direct_code",
         "is_static": True
     }

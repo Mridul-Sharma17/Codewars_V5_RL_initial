@@ -10,7 +10,7 @@ import argparse
 import json
 from datetime import datetime
 
-from config import *
+from rl_config import *
 from strategy_generator import StrategyGenerator
 from battle_simulator import BattleSimulator
 from battle_analyzer import BattleAnalyzer

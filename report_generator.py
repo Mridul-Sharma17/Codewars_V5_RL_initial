@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
-from config import *
+from rl_config import *
 
 logger = logging.getLogger('report_generator')
 

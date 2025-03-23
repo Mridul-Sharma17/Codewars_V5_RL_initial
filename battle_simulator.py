@@ -15,7 +15,7 @@ import importlib.util
 import shutil
 from typing import Dict, List, Tuple, Any
 
-from config import *
+from rl_config import *
 
 logger = logging.getLogger('battle_simulator')
 
@@ -24,14 +24,36 @@ class BattleSimulator:
     
     def __init__(self):
         """Initialize the battle simulator."""
-        self.game_config_path = os.path.join(GAME_DIR, "config.py")
-        self.game_main_path = os.path.join(GAME_DIR, "main.py")
+        self.game_config_path = os.path.join(GAME_ENGINE_DIR, "config.py")
+        self.game_main_path = os.path.join(GAME_ENGINE_DIR, "main.py")
         self.backup_config_path = os.path.join(TEMP_DIR, "config.py.bak")
+        self.teams_helper_path = os.path.join(GAME_ENGINE_DIR, "teams")
         self.temp_dir = TEMP_DIR
         
-        # Create backup of original config if it doesn't exist
+        # Create a proper default config if needed
         if not os.path.exists(self.backup_config_path):
-            shutil.copy(self.game_config_path, self.backup_config_path)
+            self._create_default_config_backup()
+            
+    def _create_default_config_backup(self):
+        """Create a proper default config backup with correct imports."""
+        default_config = """import sys
+import os
+
+# Add path to teams directory and baselines directory
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "teams", "baselines"))
+
+# Import pratyaksh strategy
+from pratyaksh import *
+
+# Set teams to pratyaksh by default
+TEAM1 = pratyaksh
+TEAM2 = pratyaksh
+VALUE_ERROR = False
+"""
+        # Write the default config to the backup file
+        with open(self.backup_config_path, 'w') as f:
+            f.write(default_config)
     
     def run_tournament(self, strategies: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """
@@ -44,8 +66,20 @@ class BattleSimulator:
             Dictionary of battle_id -> battle_data
         """
         # Prepare a list of strategies that will participate in the tournament
-        participants = [s for s_id, s in strategies.items()]
+        participants = list(strategies.values())
         logger.info(f"Running tournament with {len(participants)} strategies")
+        
+        # Make sure all strategies have metrics
+        for strategy in participants:
+            if "metrics" not in strategy:
+                strategy["metrics"] = {
+                    "wins": 0,
+                    "losses": 0,
+                    "games_played": 0,
+                    "win_rate": 0.0,
+                    "avg_tower_health": 0.0,
+                    "fitness": 0.0
+                }
         
         # Prepare results dictionary
         battle_results = {}
@@ -80,35 +114,35 @@ class BattleSimulator:
                 
                 # Update strategy metrics
                 if strategy1["id"] == result["winner_id"]:
-                    strategies[strategy1["id"]]["metrics"]["wins"] += 1
-                    strategies[strategy2["id"]]["metrics"]["losses"] += 1
+                    strategy1["metrics"]["wins"] += 1
+                    strategy2["metrics"]["losses"] += 1
                 elif strategy2["id"] == result["winner_id"]:
-                    strategies[strategy2["id"]]["metrics"]["wins"] += 1
-                    strategies[strategy1["id"]]["metrics"]["losses"] += 1
+                    strategy2["metrics"]["wins"] += 1
+                    strategy1["metrics"]["losses"] += 1
                 
-                strategies[strategy1["id"]]["metrics"]["games_played"] += 1
-                strategies[strategy2["id"]]["metrics"]["games_played"] += 1
+                strategy1["metrics"]["games_played"] += 1
+                strategy2["metrics"]["games_played"] += 1
                 
                 # Update average tower health
                 if result["strategy1_health"] is not None:
-                    current_avg = strategies[strategy1["id"]]["metrics"]["avg_tower_health"]
-                    games_played = strategies[strategy1["id"]]["metrics"]["games_played"]
-                    strategies[strategy1["id"]]["metrics"]["avg_tower_health"] = (
+                    current_avg = strategy1["metrics"]["avg_tower_health"]
+                    games_played = strategy1["metrics"]["games_played"]
+                    strategy1["metrics"]["avg_tower_health"] = (
                         (current_avg * (games_played - 1) + result["strategy1_health"]) / games_played
                     )
                 
                 if result["strategy2_health"] is not None:
-                    current_avg = strategies[strategy2["id"]]["metrics"]["avg_tower_health"]
-                    games_played = strategies[strategy2["id"]]["metrics"]["games_played"]
-                    strategies[strategy2["id"]]["metrics"]["avg_tower_health"] = (
+                    current_avg = strategy2["metrics"]["avg_tower_health"]
+                    games_played = strategy2["metrics"]["games_played"]
+                    strategy2["metrics"]["avg_tower_health"] = (
                         (current_avg * (games_played - 1) + result["strategy2_health"]) / games_played
                     )
                 
                 # Update win rate
-                for s_id in [strategy1["id"], strategy2["id"]]:
-                    wins = strategies[s_id]["metrics"]["wins"]
-                    games = strategies[s_id]["metrics"]["games_played"]
-                    strategies[s_id]["metrics"]["win_rate"] = wins / games if games > 0 else 0
+                for s in [strategy1, strategy2]:
+                    wins = s["metrics"]["wins"]
+                    games = s["metrics"]["games_played"]
+                    s["metrics"]["win_rate"] = wins / games if games > 0 else 0
         
         logger.info(f"Tournament completed. {len(battle_results)} battles run.")
         return battle_results
@@ -212,23 +246,30 @@ class BattleSimulator:
         strategy1_dir = os.path.dirname(strategy1_path)
         strategy2_dir = os.path.dirname(strategy2_path)
         
-        # Add these directories to Python path if they're not already there
-        for directory in [strategy1_dir, strategy2_dir]:
-            if directory not in sys.path:
-                sys.path.append(directory)
-        
-        # Create new config content
+        # Create new config content with precise import paths
         config_content = f"""import sys
 import os
 
-# Add strategy directories to path
-sys.path.append(r"{strategy1_dir}")
-sys.path.append(r"{strategy2_dir}")
+# Add paths to the Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))  # game_engine dir
+sys.path.append(r"{self.teams_helper_path}")  # teams dir
+sys.path.append(r"{strategy1_dir}")  # Strategy 1 dir
+sys.path.append(r"{strategy2_dir}")  # Strategy 2 dir
 
 # Import strategy modules
-from {strategy1_module} import *
-from {strategy2_module} import *
+try:
+    from {strategy1_module} import *
+except ImportError as e:
+    print(f"Error importing {strategy1_module}: {{e}}")
+    raise
 
+try:
+    from {strategy2_module} import *
+except ImportError as e:
+    print(f"Error importing {strategy2_module}: {{e}}")
+    raise
+
+# Define teams
 TEAM1 = {strategy1_module}
 TEAM2 = {strategy2_module}
 VALUE_ERROR = False
@@ -250,23 +291,33 @@ VALUE_ERROR = False
             Tuple of (winner, strategy1_health, strategy2_health)
             winner: 1 for strategy1, 2 for strategy2, 0 for tie
         """
-        # Path manipulation to correctly import the game modules
+        # Save current working directory and path
+        original_cwd = os.getcwd()
         original_path = sys.path.copy()
         
-        # Add the game directory to path
-        if GAME_DIR not in sys.path:
-            sys.path.insert(0, GAME_DIR)
-        
-        # Get the parent directory of the game directory
-        parent_dir = os.path.dirname(GAME_DIR)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        
         try:
+            # Change working directory to the game engine directory
+            # This is critical for relative path resolution
+            os.chdir(GAME_ENGINE_DIR)
+            
+            # Set up Python path for correct imports
+            sys.path = [
+                GAME_ENGINE_DIR,  # First, to make internal imports work
+                os.path.dirname(GAME_ENGINE_DIR),  # Parent directory
+                self.teams_helper_path,  # Teams directory for helper_function
+            ] + [p for p in sys.path if p not in [GAME_ENGINE_DIR, os.path.dirname(GAME_ENGINE_DIR)]]
+            
             # Import the game modules properly
             spec = importlib.util.spec_from_file_location("game_main", self.game_main_path)
             game_main = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(game_main)
+            
+            try:
+                spec.loader.exec_module(game_main)
+            except Exception as e:
+                logger.error(f"Error loading game_main: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                return 0, None, None  # Tie due to error
             
             # Define constants for the game
             GAME_START_TIME = 0
@@ -274,71 +325,85 @@ VALUE_ERROR = False
             
             # Modified version of the game's main function that returns battle result
             def modified_main():
-                # Import the required modules from the game
-                sys.path.insert(0, GAME_DIR)
-                from game.game import Game
-                
-                # Get the teams from config
-                from game.config import TEAM1, TEAM2
-                
-                # Validate teams
-                team1_valid = game_main.validate_module(TEAM1, "TEAM 1")
-                team2_valid = game_main.validate_module(TEAM2, "TEAM 2")
-                
-                if not (team1_valid and team2_valid):
-                    return 0, 0, 0  # Tie due to validation failure
-                
-                # Create game instance
-                game = Game(TEAM1.troops, TEAM2.troops, TEAM1.team_name, TEAM2.team_name)
-                
-                # Run the game silently (no UI)
-                winner, team1_health, team2_health = run_headless_game(game)
-                
-                return winner, team1_health, team2_health
+                try:
+                    # Import the required modules from the game
+                    from game import Game
+                    
+                    # Get the teams from config
+                    from config import TEAM1, TEAM2
+                    
+                    # Validate teams
+                    team1_valid = game_main.validate_module(TEAM1, "TEAM 1")
+                    team2_valid = game_main.validate_module(TEAM2, "TEAM 2")
+                    
+                    if not (team1_valid and team2_valid):
+                        logger.error("Team validation failed")
+                        return 0, 0, 0  # Tie due to validation failure
+                    
+                    # Create game instance
+                    game = Game(TEAM1.troops, TEAM2.troops, TEAM1.team_name, TEAM2.team_name)
+                    
+                    # Run the game silently (no UI)
+                    winner, team1_health, team2_health = run_headless_game(game)
+                    
+                    return winner, team1_health, team2_health
+                except Exception as e:
+                    logger.error(f"Error in modified_main: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    return 0, 0, 0  # Tie due to error
             
             def run_headless_game(game):
                 """Run the game without UI and return the winner."""
-                # Initialize variables
-                game_counter = 0
-                tower1_health = game.tower1.health
-                tower2_health = game.tower2.health
-                
-                # Run game loop
-                while game_counter < GAME_END_TIME and tower1_health > 0 and tower2_health > 0:
-                    # Update game state
-                    if GAME_END_TIME > game_counter >= GAME_START_TIME:
-                        # Provide data to teams
-                        game.data_provided1 = {}
-                        game.data_provided2 = {}
-                        
-                        # Create dummy objects for troops and towers
-                        from game.scripts.dataflow import DataFlow
-                        DataFlow.provide_data(game)
-                        
-                        # Get deployment decisions
-                        DataFlow.deployment(game)
-                        
-                        # Update game state
-                        DataFlow.attack_die(game)
+                try:
+                    # Import necessary modules
+                    from scripts.dataflow import DataFlow
                     
-                    # Update counter and health
-                    game_counter += 1
+                    # Initialize variables
+                    game_counter = 0
                     tower1_health = game.tower1.health
                     tower2_health = game.tower2.health
-                
-                # Determine winner
-                if tower1_health <= 0 and tower2_health <= 0:
-                    return 0, 0, 0  # Tie
-                elif tower1_health <= 0:
-                    return 2, 0, tower2_health  # Team 2 wins
-                elif tower2_health <= 0:
-                    return 1, tower1_health, 0  # Team 1 wins
-                elif tower1_health > tower2_health:
-                    return 1, tower1_health, tower2_health  # Team 1 wins (tiebreaker)
-                elif tower2_health > tower1_health:
-                    return 2, tower1_health, tower2_health  # Team 2 wins (tiebreaker)
-                else:
-                    return 0, tower1_health, tower2_health  # Tie
+                    
+                    # Run game loop
+                    while game_counter < GAME_END_TIME and tower1_health > 0 and tower2_health > 0:
+                        # Update game state
+                        if GAME_END_TIME > game_counter >= GAME_START_TIME:
+                            # Provide data to teams
+                            game.data_provided1 = {}
+                            game.data_provided2 = {}
+                            
+                            # Create dummy objects for troops and towers
+                            DataFlow.provide_data(game)
+                            
+                            # Get deployment decisions
+                            DataFlow.deployment(game)
+                            
+                            # Update game state
+                            DataFlow.attack_die(game)
+                        
+                        # Update counter and health
+                        game_counter += 1
+                        tower1_health = game.tower1.health
+                        tower2_health = game.tower2.health
+                    
+                    # Determine winner
+                    if tower1_health <= 0 and tower2_health <= 0:
+                        return 0, 0, 0  # Tie
+                    elif tower1_health <= 0:
+                        return 2, 0, tower2_health  # Team 2 wins
+                    elif tower2_health <= 0:
+                        return 1, tower1_health, 0  # Team 1 wins
+                    elif tower1_health > tower2_health:
+                        return 1, tower1_health, tower2_health  # Team 1 wins (tiebreaker)
+                    elif tower2_health > tower1_health:
+                        return 2, tower1_health, tower2_health  # Team 2 wins (tiebreaker)
+                    else:
+                        return 0, tower1_health, tower2_health  # Tie
+                except Exception as e:
+                    logger.error(f"Error in run_headless_game: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    return 0, 0, 0  # Tie due to error
             
             # Run the modified main function
             try:
@@ -346,8 +411,11 @@ VALUE_ERROR = False
                 return winner, strategy1_health, strategy2_health
             except Exception as e:
                 logger.error(f"Error running game: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 return 0, None, None  # Tie due to error
         
         finally:
-            # Restore original path
+            # Restore original working directory and path
+            os.chdir(original_cwd)
             sys.path = original_path

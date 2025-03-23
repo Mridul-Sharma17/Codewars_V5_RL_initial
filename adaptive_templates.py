@@ -8,7 +8,7 @@ import os
 import logging
 from typing import Dict, Any, List, Optional
 
-from config import *
+from rl_config import *
 
 logger = logging.getLogger('adaptive_templates')
 

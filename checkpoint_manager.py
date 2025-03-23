@@ -12,7 +12,7 @@ import logging
 from typing import Dict, Any, Optional, List
 import datetime
 
-from config import *
+from rl_config import *
 
 logger = logging.getLogger('checkpoint_manager')
 

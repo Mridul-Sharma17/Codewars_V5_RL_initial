@@ -8,7 +8,7 @@ import math
 import logging
 from typing import Dict, List, Any, Tuple
 
-from config import *
+from rl_config import *
 
 logger = logging.getLogger('battle_analyzer')
 

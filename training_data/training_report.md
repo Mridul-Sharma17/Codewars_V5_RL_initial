@@ -1,21 +1,21 @@
 # Tower Defense Strategy Training Report
 
-Report generated on: 2025-03-24 23:55:52
+Report generated on: 2025-03-25 03:42:54
 
 ## Training Summary
 
 - Total generations: 2
-- Total strategies: 9
-- Total battles: 22
-- Training duration: 0h 7m
+- Total strategies: 8
+- Total battles: 42
+- Training duration: 0h 17m
 
 ## Best Strategy
 
 - ID: pratyaksh
 - Type: pratyaksh
-- Games played: 36
-- Win rate: 0.69 (25/36)
-- Wilson score: 0.5314
+- Games played: 60
+- Win rate: 0.70 (42/60)
+- Wilson score: 0.5749
 
 Key parameters:
 - Lane preference: adaptive
@@ -29,7 +29,7 @@ Key parameters:
 
 | Generation | Strategies | Avg Win Rate | Best Win Rate | Best Wilson Score |
 |------------|------------|--------------|---------------|------------------|
-| 2 | 4 | 1.00 | 1.00 | 0.0000 |
+| 2 | 3 | 0.45 | 0.50 | 0.2800 |
 
 ## Visualizations
 

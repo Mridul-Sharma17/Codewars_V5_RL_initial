@@ -246,11 +246,18 @@ class TrainingManager:
         # Get number of strategies to create
         num_new_strategies = self.config["strategies_per_generation"]
         
-        # Generate evolved strategies
-        new_strategies = self.evolver.evolve_population(
-            eligible_strategies, 
-            num_offspring=num_new_strategies
-        )
+        # Generate evolved strategies with adaptive capabilities if available
+        if hasattr(self.evolver, 'evolve_population_with_adaptive'):
+            new_strategies = self.evolver.evolve_population_with_adaptive(
+                eligible_strategies, 
+                num_offspring=num_new_strategies
+            )
+        else:
+            # Use standard evolution otherwise
+            new_strategies = self.evolver.evolve_population(
+                eligible_strategies, 
+                num_offspring=num_new_strategies
+            )
         
         # Add new strategies to trainer
         for strategy in new_strategies:
@@ -261,25 +268,263 @@ class TrainingManager:
         
         print(f"Added {len(new_strategies)} new evolved strategies.")
     
-    def find_best_strategy(self):
-        """Find the strategy with the best performance using Wilson score."""
-        # Use select_best_strategies from improved_strategy_selection
-        battle_metrics = self.analyzer.metrics
-        sorted_strategies = select_best_strategies(
-            battle_metrics,
-            min_games=self.config["min_games_for_evolution"],
-            confidence=0.95
+    def select_championship_contenders(self, top_n=5):
+        """
+        Select top contenders for championship, prioritizing recent generations.
+        
+        Args:
+            top_n: Number of top strategies to include
+            
+        Returns:
+            List of (strategy_id, strategy) tuples
+        """
+        # Get strategies from the current generation with enough games
+        current_gen_strategies = []
+        for strategy_id, strategy in self.trainer.strategies.items():
+            # Check if this is from the current generation
+            is_current_gen = False
+            if strategy_id.startswith(f"gen_{self.current_generation}_"):
+                is_current_gen = True
+            elif strategy_id.startswith("gen_"):
+                parts = strategy_id.split("_")
+                if len(parts) > 1 and parts[1].isdigit() and int(parts[1]) == self.current_generation:
+                    is_current_gen = True
+            
+            if is_current_gen and strategy["metrics"]["games_played"] >= 3:
+                current_gen_strategies.append((strategy_id, strategy))
+        
+        # If we don't have enough from current gen, add some historical best performers
+        if len(current_gen_strategies) < top_n:
+            # Get all strategies with enough games played
+            all_valid_strategies = []
+            for strategy_id, strategy in self.trainer.strategies.items():
+                if strategy["metrics"]["games_played"] >= 3:
+                    # Skip current gen strategies we already added
+                    if not any(s[0] == strategy_id for s in current_gen_strategies):
+                        all_valid_strategies.append((strategy_id, strategy))
+            
+            # Sort by win rate
+            all_valid_strategies.sort(
+                key=lambda x: x[1]["metrics"]["win_rate"],
+                reverse=True
+            )
+            
+            # Add top performers from history to fill remaining slots
+            remaining_slots = top_n - len(current_gen_strategies)
+            historical_best = all_valid_strategies[:remaining_slots]
+            
+            # Combine current gen and historical best
+            contenders = current_gen_strategies + historical_best
+        else:
+            # Sort current gen by win rate and take top performers
+            current_gen_strategies.sort(
+                key=lambda x: x[1]["metrics"]["win_rate"],
+                reverse=True
+            )
+            contenders = current_gen_strategies[:top_n]
+        
+        # Make sure we have enough contenders
+        if len(contenders) < 2:
+            print("Warning: Not enough valid strategies for championship")
+            # Fall back to all strategies with enough games
+            all_strategies = []
+            for strategy_id, strategy in self.trainer.strategies.items():
+                if strategy["metrics"]["games_played"] >= 3:
+                    all_strategies.append((strategy_id, strategy))
+            
+            all_strategies.sort(
+                key=lambda x: x[1]["metrics"]["win_rate"],
+                reverse=True
+            )
+            contenders = all_strategies[:top_n]
+        
+        return contenders
+    
+    def run_championship(self, top_n=5, battles_per_matchup=3):
+        """
+        Run a championship tournament to determine the best strategy.
+        
+        Args:
+            top_n: Number of top strategies to include in championship
+            battles_per_matchup: Number of battles to run for each strategy pair
+            
+        Returns:
+            ID of the winning strategy
+        """
+        print("\n=== Running Championship Tournament ===")
+        
+        # Select top contenders using the specialized method
+        top_contenders = self.select_championship_contenders(top_n)
+        
+        if not top_contenders:
+            print("Not enough strategies with sufficient games for championship")
+            return None
+        
+        contender_ids = [id for id, _ in top_contenders]
+        print(f"Championship contenders: {', '.join(contender_ids)}")
+        
+        # Create tournament pairs ensuring each strategy battles every other
+        tournament_pairs = []
+        for i, (id1, _) in enumerate(top_contenders):
+            for j, (id2, _) in enumerate(top_contenders):
+                if i != j:  # Don't battle against self
+                    for _ in range(battles_per_matchup):
+                        tournament_pairs.append((id1, id2))
+        
+        # Shuffle to avoid systematic bias
+        random.shuffle(tournament_pairs)
+        
+        # Run the tournament
+        print(f"Running {len(tournament_pairs)} championship battles...")
+        championship_results = {id: {"wins": 0, "games": 0} for id, _ in top_contenders}
+        
+        for team1_id, team2_id in tournament_pairs:
+            # Find paths to team files
+            team1_path = self._get_strategy_path(team1_id)
+            team2_path = self._get_strategy_path(team2_id)
+            
+            if not team1_path or not team2_path:
+                print(f"Warning: Could not find path for {team1_id} or {team2_id}, skipping match")
+                continue
+            
+            print(f"Championship battle: {team1_id} vs {team2_id}")
+            result = self.game_runner.run_battle(team1_path, team2_path)
+            
+            if result:
+                # Update championship metrics
+                if result["winner"] == result["team1_name"]:
+                    championship_results[team1_id]["wins"] += 1
+                elif result["winner"] == result["team2_name"]:
+                    championship_results[team2_id]["wins"] += 1
+                    
+                championship_results[team1_id]["games"] += 1
+                championship_results[team2_id]["games"] += 1
+        
+        # Calculate win rates and find champion
+        for id in championship_results:
+            if championship_results[id]["games"] > 0:
+                championship_results[id]["win_rate"] = (
+                    championship_results[id]["wins"] / championship_results[id]["games"]
+                )
+            else:
+                championship_results[id]["win_rate"] = 0
+        
+        # Sort by win rate
+        sorted_results = sorted(
+            championship_results.items(),
+            key=lambda x: x[1]["win_rate"],
+            reverse=True
         )
         
-        if sorted_strategies:
-            best_strategy = sorted_strategies[0]
-            self.best_strategy_id = best_strategy[0]
-            stats = best_strategy[1]
+        # Print championship results
+        print("\nChampionship Results:")
+        print("--------------------")
+        for strategy_id, results in sorted_results:
+            print(f"{strategy_id}: Win rate {results['win_rate']:.2f} ({results['wins']}/{results['games']})")
+        
+        if sorted_results:
+            champion_id = sorted_results[0][0]
+            print(f"\nChampionship winner: {champion_id}")
+            print(f"Win rate: {sorted_results[0][1]['win_rate']:.2f} "
+                  f"({sorted_results[0][1]['wins']}/{sorted_results[0][1]['games']})")
+            return champion_id
+        else:
+            print("No championship results available")
+            return None
+    
+    def _get_strategy_path(self, strategy_id):
+        """
+        Find the file path for a given strategy ID.
+        
+        Args:
+            strategy_id: ID of the strategy to find
             
-            print(f"\nBest strategy found: {self.best_strategy_id}")
-            print(f"Win rate: {stats['win_rate']:.2f} ({stats['wins']}/{stats['games']} games)")
-            print(f"Wilson score: {stats['wilson_score']:.4f}")
-            return self.best_strategy_id
+        Returns:
+            Full path to the strategy file, or None if not found
+        """
+        # Check if this is a generation-based ID
+        gen_number = None
+        if strategy_id.startswith("gen_"):
+            parts = strategy_id.split("_")
+            if len(parts) > 1 and parts[1].isdigit():
+                gen_number = int(parts[1])
+        
+        # Determine generations to search
+        generations_to_search = []
+        if gen_number is not None:
+            # If we know the generation, search that one first
+            generations_to_search.append(gen_number)
+        
+        # Add all other generations in descending order (newest first)
+        for gen in range(self.current_generation, 0, -1):
+            if gen not in generations_to_search:
+                generations_to_search.append(gen)
+        
+        # Also check for non-generation files in the teams directory
+        # First, try in generation folders
+        for gen in generations_to_search:
+            gen_dir = os.path.join(self.teams_dir, f"gen_{gen}")
+            if os.path.exists(gen_dir):
+                # Try with .py extension
+                path = os.path.join(gen_dir, f"{strategy_id}.py")
+                if os.path.exists(path):
+                    return path
+                
+                # Try without extension if ID already includes .py
+                if strategy_id.endswith(".py"):
+                    path = os.path.join(gen_dir, strategy_id)
+                    if os.path.exists(path):
+                        return path
+        
+        # Check in main teams directory
+        teams_dir = "teams"
+        if os.path.exists(teams_dir):
+            # Try with .py extension
+            path = os.path.join(teams_dir, f"{strategy_id}.py")
+            if os.path.exists(path):
+                return path
+            
+            # Try without extension
+            if strategy_id.endswith(".py"):
+                path = os.path.join(teams_dir, strategy_id)
+                if os.path.exists(path):
+                    return path
+        
+        # As a last resort, search all generation folders for partial matches
+        for gen in range(self.current_generation, 0, -1):
+            gen_dir = os.path.join(self.teams_dir, f"gen_{gen}")
+            if os.path.exists(gen_dir):
+                for file in os.listdir(gen_dir):
+                    if file.startswith(strategy_id) or strategy_id in file:
+                        return os.path.join(gen_dir, file)
+        
+        print(f"Warning: Could not find path for strategy {strategy_id}")
+        return None
+    
+    def find_best_strategy(self):
+        """
+        Find the best strategy using a championship tournament.
+        
+        Returns:
+            ID of the best strategy
+        """
+        # Use tournament selection to find the best strategy
+        best_strategy_id = self.run_championship(top_n=5, battles_per_matchup=3)
+        
+        if best_strategy_id:
+            # Update best strategy ID
+            self.best_strategy_id = best_strategy_id
+            
+            # Print info about the best strategy
+            strategy = self.trainer.strategies.get(best_strategy_id)
+            if strategy:
+                print(f"\nBest strategy selected: {best_strategy_id}")
+                if "metrics" in strategy:
+                    metrics = strategy["metrics"]
+                    print(f"Overall stats: Win rate {metrics.get('win_rate', 0):.2f} "
+                          f"({metrics.get('wins', 0)}/{metrics.get('games_played', 0)} games)")
+            
+            return best_strategy_id
         else:
             print("\nNo strategies with enough games to determine best yet.")
             return None

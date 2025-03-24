@@ -1,5 +1,5 @@
 {
-  "generations": 10,
+  "generations": 20,
   "battles_per_generation": 20,
   "strategies_per_generation": 4,
   "min_games_for_evolution": 5,

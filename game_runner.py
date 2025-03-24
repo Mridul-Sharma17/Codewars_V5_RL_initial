@@ -12,18 +12,16 @@ import queue
 class GameRunner:
     """Handles running games between different strategies and collecting results"""
     
-    def __init__(self, game_path="game", headless=True, speed_multiplier=100000):
+    def __init__(self, game_path="game", headless=False):
         """
         Initialize the game runner
         
         Args:
             game_path: Path to the game directory
             headless: Whether to run in headless mode (no graphics)
-            speed_multiplier: How much to speed up the game (higher = faster)
         """
         self.game_path = game_path
-        self.headless = headless
-        self.speed_multiplier = speed_multiplier
+        self.headless = headless  # Keep headless mode option
         self.result_queue = queue.Queue()
         
         # Ensure game directory exists
@@ -83,7 +81,7 @@ class GameRunner:
             f.write("TEAM1 = a\n")
             f.write("TEAM2 = b\n")
             f.write("VALUE_ERROR = False\n")
-            # Add headless mode indicator
+            # Add headless mode indicator if needed
             if self.headless:
                 f.write("HEADLESS_MODE = True\n")
         print("Updated config.py to use our teams")
@@ -112,19 +110,18 @@ class GameRunner:
                 # This completely disables all display functionality
                 env["SDL_VIDEODRIVER"] = "dummy"
                 env["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
-                # Additional env vars to ensure no display is used
                 env["SDL_AUDIODRIVER"] = "dummy"
                 
             # Run the instrumented main.py
             cmd = [sys.executable, "instrumented_main.py"]
             
-            # Start the process with modified environment
+            # Start the process with modified environment if headless
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE,
                 text=True,
-                env=env
+                env=env if self.headless else None
             )
             
             # Wait for process to complete
@@ -187,8 +184,8 @@ class GameRunner:
             if self.headless:
                 f.write("def headless_simulation(game):\n")
                 f.write("    \"\"\"Run the game simulation without any rendering\"\"\"\n")
-                f.write("    # Set game speed very high for fastest simulation\n")
-                f.write("    game.fps = 100000\n\n")
+                f.write("    # Set high FPS\n")
+                f.write("    game.fps = 500\n\n")
                 f.write("    # Run game for a maximum number of frames\n")
                 f.write("    game_end_time = 1830  # Default game end time\n")
                 f.write("    if 'GAME_END_TIME' in globals():\n")
@@ -197,7 +194,27 @@ class GameRunner:
                 f.write("    max_frames = game_end_time + 100  # Add buffer for outro\n")
                 f.write("    while game.game_counter < max_frames:\n")
                 f.write("        # Only update game mechanics, no rendering\n")
-                f.write("        game.update_game_mechanics()\n")
+                f.write("        if hasattr(game, 'update_game_mechanics'):\n")
+                f.write("            game.update_game_mechanics()\n")
+                f.write("        else:\n")
+                f.write("            # Simulate game mechanics without rendering\n")
+                f.write("            if GAME_END_TIME > game.game_counter >= GAME_START_TIME:\n")
+                f.write("                if hasattr(game, 'tower1'):\n")
+                f.write("                    # Handle troop deployments, attacks, and deaths\n")
+                f.write("                    for troop in game.tower1.myTroops:\n")
+                f.write("                        troop.update_position()\n")
+                f.write("                    for troop in game.tower2.myTroops:\n")
+                f.write("                        troop.update_position()\n")
+                f.write("                    for troop in game.tower1.myTroops:\n")
+                f.write("                        troop.do_work()\n")
+                f.write("                    for troop in game.tower2.myTroops:\n")
+                f.write("                        troop.do_work()\n")
+                f.write("                    game.tower1.do_work()\n")
+                f.write("                    game.tower2.do_work()\n")
+                f.write("                    for troop in game.tower1.myTroops:\n")
+                f.write("                        troop.die()\n")
+                f.write("                    for troop in game.tower2.myTroops:\n")
+                f.write("                        troop.die()\n")
                 f.write("        game.game_counter += 1\n\n")
                 f.write("        # Check if game has ended\n")
                 f.write("        if game.winner is not None and game.game_counter > game_end_time:\n")
@@ -206,7 +223,7 @@ class GameRunner:
                 f.write("    results = extract_game_results(game)\n")
                 f.write("    print(\"GAME_RESULTS: \" + json.dumps(results))\n\n")
             
-            # Modify the end of the original main code to use our headless simulation if enabled
+            # Modify the end of the original main code for both modes
             modified_code = main_code.replace(
                 "if team1_test_pass and team2_test_pass:\n    Game(TEAM1.troops,TEAM2.troops,TEAM1.team_name,TEAM2.team_name).run()",
                 """
@@ -225,44 +242,51 @@ if team1_test_pass and team2_test_pass:
             print(f"Error in headless simulation: {e}")
             sys.exit(1)
     else:
-        # Regular display mode - override run method
+        # Regular display mode - override run method to auto-close when finished
         original_run = game.run
         def modified_run():
-            # Set game speed higher
-            game.fps = 1000
+            # IMPORTANT: Explicitly set fps to 500 (fast speed)
+            game.fps = 500
             
-            # Run game for a maximum number of frames
+            # Set up variables to track game state
             game_end_time = 1830  # Default
             if 'GAME_END_TIME' in globals():
                 game_end_time = GAME_END_TIME
                 
-            # Run with visual rendering
-            max_frames = game_end_time + 100  # Add buffer for outro
-            while game.game_counter < max_frames:
+            # Auto-close detection
+            running = True
+            
+            # Run the game loop with high speed settings
+            while running:
+                # Render the game
                 game.render_game_screen()
                 game.render_left_screen()
                 game.render_right_screen()
                 
+                # Check for quit event
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        pygame.quit()
-                        sys.exit()
-                        
+                        running = False
+                
+                # Update display
                 pygame.display.update()
                 
-                # Update game state
+                # Use the high FPS setting
                 game.clock.tick(game.fps)
                 game.game_counter += 1
                 
-                # Check if game has ended
+                # Auto-close when game is over
                 if game.winner is not None and game.game_counter > game_end_time:
-                    break
-                    
+                    running = False
+            
+            # Auto-close pygame when done
+            pygame.quit()
+            
             # Output results
             results = extract_game_results(game)
             print("GAME_RESULTS: " + json.dumps(results))
-            pygame.quit()
         
+        # Replace the game's run method with our modified version
         game.run = modified_run
         game.run()
 """
@@ -338,7 +362,7 @@ if team1_test_pass and team2_test_pass:
         """
         all_results = []
         
-        # Generate all pairs of teams
+        # Generate all pairs of teams for complete round-robin
         team_pairs = []
         for i, team1 in enumerate(team_files):
             for j, team2 in enumerate(team_files):

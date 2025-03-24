@@ -9,7 +9,7 @@ troops = [
     Troops.minion, Troops.barbarian
 ]
 deploy_list = Troops([])
-team_signal = "v:1,l:s,e:5.27464057820608,d:0.9,y:30,t:bmvkd"
+team_signal = "v:1,l:l,e:5,d:0.9,y:30,t:wmvkd,c:1.3"
 
 def random_x(min_val=-20, max_val=20):
     return random.randint(min_val, max_val)
@@ -47,7 +47,7 @@ def parse_signal(signal):
     # Default parameters
     params = {
         "lane": "right",  # Default lane preference
-        "min_elixir": 5.27464057820608,  # Minimum elixir to deploy
+        "min_elixir": 5,  # Minimum elixir to deploy
         "defensive_trigger": 0.9,  # Tower health % to switch to defensive
         "y_default": 30,  # Default y position
         "y_defensive": 20  # Defensive y position

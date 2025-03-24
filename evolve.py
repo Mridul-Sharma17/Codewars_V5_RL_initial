@@ -154,6 +154,66 @@ class StrategyEvolver:
             
         return best_strategy
     
+    def evolve_population_with_adaptive(self, strategies, num_offspring=4):
+        """
+        Create a new generation including both evolved and adaptive strategies.
+        
+        Args:
+            strategies: Dictionary of strategy_id -> strategy
+            num_offspring: Total number of new strategies to create
+            
+        Returns:
+            List of new strategies
+        """
+        # Import adaptive strategy manager
+        try:
+            from adaptive_strategy import AdaptiveStrategyManager
+            adaptive_manager = AdaptiveStrategyManager()
+        except ImportError:
+            print("Warning: AdaptiveStrategyManager not available, using only standard evolution")
+            return self.evolve_population(strategies, num_offspring)
+        
+        # Standard evolutionary offspring (60% of total)
+        evolved_count = max(1, int(num_offspring * 0.6))
+        offspring = self.evolve_population(strategies, evolved_count)
+        
+        # Generate adaptive strategies (20% of total)
+        adaptive_count = max(1, int(num_offspring * 0.2))
+        adaptive_strategies = adaptive_manager.generate_adaptive_strategies(
+            count=adaptive_count, 
+            base_strategies=strategies
+        )
+        
+        # Generate counter strategies (20% of total)
+        counter_count = num_offspring - evolved_count - adaptive_count
+        if counter_count > 0:
+            # Find top strategies to counter
+            sorted_strategies = sorted(
+                strategies.values(),
+                key=lambda s: s["metrics"].get("wilson_score", 0) 
+                            if "metrics" in s else 0,
+                reverse=True
+            )
+            top_strategies = sorted_strategies[:min(5, len(sorted_strategies))]
+            
+            counter_strategies = adaptive_manager.generate_counter_strategies(
+                opponent_strategies=top_strategies,
+                count=counter_count,
+                base_strategies=strategies
+            )
+        else:
+            counter_strategies = []
+        
+        # Combine all strategy types
+        all_strategies = offspring + adaptive_strategies + counter_strategies
+        
+        # Print summary of generated strategies
+        print(f"Generated {len(offspring)} evolved strategies")
+        print(f"Generated {len(adaptive_strategies)} adaptive strategies")
+        print(f"Generated {len(counter_strategies)} counter strategies")
+        
+        return all_strategies
+
     def _crossover(self, parent1: Dict, parent2: Dict) -> Dict:
         """
         Create a new strategy by combining two parent strategies.

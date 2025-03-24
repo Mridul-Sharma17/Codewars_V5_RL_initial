@@ -1,7 +1,7 @@
 from teams.helper_function import Troops, Utils
 import random
 
-team_name = "adaptive_strategy"
+team_name = "evolved_1"
 troops = [
     Troops.dragon, Troops.wizard, 
     Troops.valkyrie, Troops.musketeer,
@@ -9,9 +9,9 @@ troops = [
     Troops.minion, Troops.barbarian
 ]
 deploy_list = Troops([])
-team_signal = "v:1,l:a,e:3,d:0.7,y:40,t:dwmva,c:1.5"
+team_signal = "v:1,l:l,e:5,d:0.9,y:30,t:wmvkd,c:1.3"
 
-def random_x(min_val=-25, max_val=25):
+def random_x(min_val=-20, max_val=20):
     return random.randint(min_val, max_val)
 
 def deploy(arena_data: dict):
@@ -47,9 +47,9 @@ def parse_signal(signal):
     # Default parameters
     params = {
         "lane": "right",  # Default lane preference
-        "min_elixir": 3,  # Minimum elixir to deploy
-        "defensive_trigger": 0.65,  # Tower health % to switch to defensive
-        "y_default": 40,  # Default y position
+        "min_elixir": 5,  # Minimum elixir to deploy
+        "defensive_trigger": 0.9,  # Tower health % to switch to defensive
+        "y_default": 30,  # Default y position
         "y_defensive": 20  # Defensive y position
     }
     

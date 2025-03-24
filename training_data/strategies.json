@@ -33,12 +33,12 @@
       "tank_priority": 1.3
     },
     "metrics": {
-      "games_played": 66,
-      "wins": 45,
+      "games_played": 68,
+      "wins": 47,
       "losses": 16,
       "avg_tower_health": 0,
-      "win_rate": 0.6818181818181818,
-      "wilson_score": 0.5621255011195574
+      "win_rate": 0.6911764705882353,
+      "wilson_score": 0.5736318830649045
     },
     "troop_priority": [
       "dragon",
@@ -116,177 +116,10 @@
       ]
     }
   },
-  "gen_6dc80c7e": {
-    "id": "gen_6dc80c7e",
-    "name": "evolved_1",
-    "troop_selection": [
-      "dragon",
-      "wizard",
-      "valkyrie",
-      "musketeer",
-      "knight",
-      "archer",
-      "minion",
-      "barbarian"
-    ],
-    "lane_preference": "left",
-    "elixir_thresholds": {
-      "min_deploy": 5,
-      "save_threshold": 7,
-      "emergency_threshold": 2
-    },
-    "position_settings": {
-      "x_range": [
-        -20,
-        20
-      ],
-      "y_default": 30,
-      "defensive_y": 20
-    },
-    "defensive_trigger": 0.9,
-    "counter_weights": {
-      "air_vs_ground": 1.348311948296524,
-      "splash_vs_group": 1.5,
-      "tank_priority": 1.3
-    },
-    "metrics": {
-      "games_played": 16,
-      "wins": 9,
-      "losses": 6,
-      "avg_tower_health": 0,
-      "win_rate": 0.5625,
-      "wilson_score": 0.331785563988119
-    },
-    "troop_priority": [
-      "wizard",
-      "musketeer",
-      "valkyrie",
-      "knight",
-      "dragon",
-      "archer",
-      "barbarian",
-      "minion"
-    ]
-  },
-  "gen_38ce3595": {
-    "id": "gen_38ce3595",
-    "name": "evolved_1",
-    "troop_selection": [
-      "dragon",
-      "wizard",
-      "valkyrie",
-      "musketeer",
-      "knight",
-      "archer",
-      "minion",
-      "barbarian"
-    ],
-    "lane_preference": "split",
-    "elixir_thresholds": {
-      "min_deploy": 5.27464057820608,
-      "save_threshold": 7,
-      "emergency_threshold": 1.6262870237815514
-    },
-    "position_settings": {
-      "x_range": [
-        -20,
-        20
-      ],
-      "y_default": 30,
-      "defensive_y": 20
-    },
-    "defensive_trigger": 0.9,
-    "counter_weights": {
-      "air_vs_ground": 1.2,
-      "splash_vs_group": 1.5,
-      "tank_priority": 1.3
-    },
-    "metrics": {
-      "games_played": 6,
-      "wins": 2,
-      "losses": 4,
-      "avg_tower_health": 0,
-      "win_rate": 0.3333333333333333,
-      "wilson_score": 0.09677141110578043
-    },
-    "troop_priority": [
-      "barbarian",
-      "musketeer",
-      "valkyrie",
-      "knight",
-      "dragon",
-      "archer",
-      "wizard",
-      "minion"
-    ]
-  },
-  "adaptive_b40b5c28": {
-    "id": "adaptive_b40b5c28",
-    "name": "adaptive_strategy",
-    "troop_selection": [
-      "dragon",
-      "wizard",
-      "valkyrie",
-      "musketeer",
-      "knight",
-      "archer",
-      "minion",
-      "barbarian"
-    ],
-    "lane_preference": "adaptive",
-    "elixir_thresholds": {
-      "min_deploy": 3,
-      "save_threshold": 7,
-      "emergency_threshold": 2
-    },
-    "position_settings": {
-      "x_range": [
-        -25,
-        25
-      ],
-      "y_default": 40,
-      "defensive_y": 20
-    },
-    "defensive_trigger": 0.65,
-    "counter_weights": {
-      "air_vs_ground": 1.5,
-      "splash_vs_group": 1.5,
-      "tank_priority": 1.3
-    },
-    "metrics": {
-      "games_played": 6,
-      "wins": 2,
-      "losses": 4,
-      "win_rate": 0.3333333333333333,
-      "wilson_score": 0.09677141110578043
-    },
-    "troop_priority": [
-      "dragon",
-      "wizard",
-      "musketeer",
-      "valkyrie",
-      "archer",
-      "skeleton",
-      "barbarian",
-      "minion"
-    ],
-    "counter_strategy": {
-      "analyze_opponent": true,
-      "air_counters": [
-        "archer",
-        "musketeer",
-        "wizard"
-      ],
-      "ground_counters": [
-        "dragon",
-        "minion",
-        "valkyrie"
-      ],
-      "counter_bonus": 3.0
-    },
-    "gen_57a83604": {
-      "id": "gen_57a83604",
-      "name": "evolved_1",
+  
+  "aggressive_rush": {
+      "id": "aggressive_rush",
+      "name": "aggressive_rush",
       "troop_selection": [
         "dragon",
         "wizard",
@@ -297,163 +130,320 @@
         "minion",
         "barbarian"
       ],
-      "lane_preference": "left",
+      "lane_preference": "focused",
       "elixir_thresholds": {
-        "min_deploy": 4.774091980201322,
-        "save_threshold": 6.85976982644892,
-        "emergency_threshold": 2.557568978202955
+        "min_deploy": 2.5,
+        "save_threshold": 6,
+        "emergency_threshold": 1.5
       },
       "position_settings": {
-        "x_range": [
-          -20,
-          20
-        ],
+        "x_range": [-15, 15],
         "y_default": 45,
-        "defensive_y": 18
+        "defensive_y": 25
       },
-      "defensive_trigger": 0.5,
+      "defensive_trigger": 0.4,
       "counter_weights": {
-        "air_vs_ground": 1.3357408529253774,
-        "splash_vs_group": 1.5614561649971859,
-        "tank_priority": 1.3
+        "air_vs_ground": 1.2,
+        "splash_vs_group": 1.4,
+        "tank_priority": 1.5
       },
       "metrics": {
-        "games_played": 29,
-        "wins": 13,
-        "losses": 13,
-        "avg_tower_health": 0,
-        "win_rate": 0.4482758620689655
+        "games_played": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0
+      },
+      "troop_priority": [
+        "valkyrie",
+        "knight",
+        "dragon",
+        "barbarian",
+        "minion",
+        "musketeer",
+        "wizard",
+        "archer"
+      ],
+      "attack_pattern": {
+        "early_rush": true,
+        "double_lane_switch": true,
+        "elixir_advantage_threshold": 1.5,
+        "group_deploy": true
+      }
+    },
+    "defensive_fortress": {
+      "id": "defensive_fortress",
+      "name": "defensive_fortress",
+      "troop_selection": [
+        "dragon",
+        "wizard",
+        "valkyrie",
+        "musketeer",
+        "knight",
+        "archer",
+        "minion",
+        "barbarian"
+      ],
+      "lane_preference": "balanced",
+      "elixir_thresholds": {
+        "min_deploy": 6,
+        "save_threshold": 8,
+        "emergency_threshold": 3
+      },
+      "position_settings": {
+        "x_range": [-25, 25],
+        "y_default": 25,
+        "defensive_y": 15
+      },
+      "defensive_trigger": 0.8,
+      "counter_weights": {
+        "air_vs_ground": 1.6,
+        "splash_vs_group": 1.7,
+        "tank_priority": 1.2
+      },
+      "metrics": {
+        "games_played": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0
       },
       "troop_priority": [
         "wizard",
         "musketeer",
         "valkyrie",
+        "dragon",
         "knight",
         "archer",
-        "barbarian",
         "minion",
-        "dragon"
-      ]
-    },
-    "adaptive_strategy": {
-      "enabled": true,
-      "analyze_opponent": true,
-      "adaptation_threshold": 0.49145128248884845,
-      "lane_adaptation": true,
-      "troop_adaptation": true,
-      "initial_observation_time": 5,
-      "adaptation_rationale": "Dynamic strategy that adapts to opponent patterns"
-    }
-  },
-  "gen_e5d33c1b": {
-    "id": "gen_e5d33c1b",
-    "name": "evolved_1",
-    "troop_selection": [
-      "dragon",
-      "wizard",
-      "valkyrie",
-      "musketeer",
-      "knight",
-      "archer",
-      "minion",
-      "barbarian"
-    ],
-    "lane_preference": "left",
-    "elixir_thresholds": {
-      "min_deploy": 5,
-      "save_threshold": 7,
-      "emergency_threshold": 2
-    },
-    "position_settings": {
-      "x_range": [
-        -20,
-        20
+        "barbarian"
       ],
-      "y_default": 30,
-      "defensive_y": 20
+      "defensive_pattern": {
+        "prioritize_defense": true,
+        "counter_push": true,
+        "protect_towers": true,
+        "spacing_multiplier": 1.5
+      }
     },
-    "defensive_trigger": 0.9,
-    "counter_weights": {
-      "air_vs_ground": 1.3187878500868335,
-      "splash_vs_group": 1.4658693077077474,
-      "tank_priority": 1.3
-    },
-    "metrics": {
-      "games_played": 0,
-      "wins": 0,
-      "losses": 0,
-      "avg_tower_health": 0,
-      "win_rate": 0
-    },
-    "troop_priority": [
-      "wizard",
-      "musketeer",
-      "valkyrie",
-      "knight",
-      "dragon",
-      "archer",
-      "barbarian",
-      "minion"
-    ]
-  },
-  "adaptive_c19632a0": {
-    "id": "adaptive_c19632a0",
-    "name": "adaptive_strategy",
-    "troop_selection": [
-      "dragon",
-      "wizard",
-      "valkyrie",
-      "musketeer",
-      "knight",
-      "archer",
-      "minion",
-      "barbarian"
-    ],
-    "lane_preference": "left",
-    "elixir_thresholds": {
-      "min_deploy": 5,
-      "save_threshold": 7,
-      "emergency_threshold": 2
-    },
-    "position_settings": {
-      "x_range": [
-        -20,
-        20
+    "balanced_flex": {
+      "id": "balanced_flex",
+      "name": "balanced_flex",
+      "troop_selection": [
+        "dragon",
+        "wizard",
+        "valkyrie",
+        "musketeer",
+        "knight",
+        "archer",
+        "minion",
+        "barbarian"
       ],
-      "y_default": 30,
-      "defensive_y": 20
+      "lane_preference": "adaptive",
+      "elixir_thresholds": {
+        "min_deploy": 4,
+        "save_threshold": 7,
+        "emergency_threshold": 2.5
+      },
+      "position_settings": {
+        "x_range": [-22, 22],
+        "y_default": 35,
+        "defensive_y": 20
+      },
+      "defensive_trigger": 0.6,
+      "counter_weights": {
+        "air_vs_ground": 1.4,
+        "splash_vs_group": 1.5,
+        "tank_priority": 1.3
+      },
+      "metrics": {
+        "games_played": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0
+      },
+      "troop_priority": [
+        "dragon",
+        "musketeer",
+        "valkyrie",
+        "wizard",
+        "knight",
+        "archer",
+        "minion",
+        "barbarian"
+      ],
+      "phase_strategy": {
+        "early_game_aggressive": true,
+        "mid_game_control": true,
+        "late_game_all_in": true,
+        "phase_timing": [30, 60]
+      }
     },
-    "defensive_trigger": 0.9,
-    "counter_weights": {
-      "air_vs_ground": 1.348311948296524,
-      "splash_vs_group": 1.5,
-      "tank_priority": 1.3
+    "air_domination": {
+      "id": "air_domination",
+      "name": "air_domination",
+      "troop_selection": [
+        "dragon",
+        "wizard",
+        "valkyrie",
+        "musketeer",
+        "knight",
+        "archer",
+        "minion",
+        "barbarian"
+      ],
+      "lane_preference": "split",
+      "elixir_thresholds": {
+        "min_deploy": 5,
+        "save_threshold": 8,
+        "emergency_threshold": 2.5
+      },
+      "position_settings": {
+        "x_range": [-20, 20],
+        "y_default": 40,
+        "defensive_y": 22
+      },
+      "defensive_trigger": 0.55,
+      "counter_weights": {
+        "air_vs_ground": 2.0,
+        "splash_vs_group": 1.3,
+        "tank_priority": 1.1
+      },
+      "metrics": {
+        "games_played": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0
+      },
+      "troop_priority": [
+        "dragon",
+        "minion",
+        "wizard",
+        "musketeer",
+        "valkyrie",
+        "knight",
+        "archer",
+        "barbarian"
+      ],
+      "air_strategy": {
+        "prioritize_air_troops": true,
+        "air_counters": ["musketeer", "archer"],
+        "air_support_timing": 1.5,
+        "ground_distraction": true
+      }
     },
-    "metrics": {
-      "games_played": 0,
-      "wins": 0,
-      "losses": 0,
-      "win_rate": 0,
-      "wilson_score": 0
+    "tank_spank": {
+      "id": "tank_spank",
+      "name": "tank_spank",
+      "troop_selection": [
+        "dragon",
+        "wizard",
+        "valkyrie",
+        "musketeer",
+        "knight",
+        "archer",
+        "minion",
+        "barbarian"
+      ],
+      "lane_preference": "right",
+      "elixir_thresholds": {
+        "min_deploy": 5.5,
+        "save_threshold": 8,
+        "emergency_threshold": 2
+      },
+      "position_settings": {
+        "x_range": [-18, 18],
+        "y_default": 38,
+        "defensive_y": 18
+      },
+      "defensive_trigger": 0.7,
+      "counter_weights": {
+        "air_vs_ground": 1.3,
+        "splash_vs_group": 1.6,
+        "tank_priority": 1.8
+      },
+      "metrics": {
+        "games_played": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0
+      },
+      "troop_priority": [
+        "valkyrie",
+        "knight",
+        "dragon",
+        "wizard",
+        "musketeer",
+        "archer",
+        "minion",
+        "barbarian"
+      ],
+      "tank_strategy": {
+        "tank_first": true,
+        "support_delay": 1.2,
+        "tank_rotation": true,
+        "support_positioning": [5, 8]
+      }
     },
-    "troop_priority": [
-      "wizard",
-      "musketeer",
-      "valkyrie",
-      "knight",
-      "dragon",
-      "archer",
-      "barbarian",
-      "minion"
-    ],
-    "adaptive_strategy": {
-      "enabled": true,
-      "analyze_opponent": true,
-      "adaptation_threshold": 0.5411076177749256,
-      "lane_adaptation": true,
-      "troop_adaptation": true,
-      "initial_observation_time": 5,
-      "adaptation_rationale": "Dynamic strategy that adapts to opponent patterns"
+    "adaptive_counter": {
+      "id": "adaptive_counter",
+      "name": "adaptive_counter",
+      "troop_selection": [
+        "dragon",
+        "wizard",
+        "valkyrie",
+        "musketeer",
+        "knight",
+        "archer",
+        "minion",
+        "barbarian"
+      ],
+      "lane_preference": "adaptive",
+      "elixir_thresholds": {
+        "min_deploy": 4.5,
+        "save_threshold": 7.5,
+        "emergency_threshold": 2.2
+      },
+      "position_settings": {
+        "x_range": [-25, 25],
+        "y_default": 36,
+        "defensive_y": 18
+      },
+      "defensive_trigger": 0.65,
+      "counter_weights": {
+        "air_vs_ground": 1.5,
+        "splash_vs_group": 1.5,
+        "tank_priority": 1.4
+      },
+      "metrics": {
+        "games_played": 0,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": 0
+      },
+      "troop_priority": [
+        "dragon",
+        "wizard",
+        "musketeer",
+        "valkyrie",
+        "knight",
+        "archer",
+        "minion",
+        "barbarian"
+      ],
+      "adaptive_strategy": {
+        "enabled": true,
+        "analyze_opponent": true,
+        "adaptation_threshold": 0.6,
+        "lane_adaptation": true,
+        "troop_adaptation": true,
+        "initial_observation_time": 4,
+        "adaptation_rationale": "Advanced counter system that adapts to opponent's strategy"
+      },
+      "counter_strategy": {
+        "analyze_opponent": true,
+        "air_counters": ["archer", "musketeer", "wizard"],
+        "ground_counters": ["dragon", "minion", "valkyrie"],
+        "counter_bonus": 3.5,
+        "track_opponent_elixir": true,
+        "identify_patterns": true
+      }
     }
   }
-}

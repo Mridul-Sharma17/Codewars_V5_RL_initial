@@ -18,20 +18,20 @@ from strategy_generator import StrategyGenerator
 from evolve import StrategyEvolver
 from battle_analyzer import BattleAnalyzer
 from strategy_encoder import StrategyEncoder
+from improved_strategy_selection import select_best_strategies, calculate_wilson_score
 
 class TrainingManager:
     """
     Main class that orchestrates the entire reinforcement learning training process.
     """
     
-    def __init__(self, output_dir="training_data", headless=False, speed_multiplier=3):
+    def __init__(self, output_dir="training_data", headless=False):
         """
         Initialize the training manager.
         
         Args:
             output_dir: Directory for storing training data and results
-            headless: Whether to run games without graphics
-            speed_multiplier: Game speed multiplier
+            headless: Whether to run games without graphics (auto-closes windows)
         """
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -39,14 +39,14 @@ class TrainingManager:
         # Initialize components
         print("Initializing training components...")
         self.trainer = RLTrainer(output_dir=output_dir)
-        self.game_runner = GameRunner(headless=headless, speed_multiplier=speed_multiplier)
+        self.game_runner = GameRunner(game_path="game", headless=headless)
         self.strategy_generator = StrategyGenerator()
         self.evolver = StrategyEvolver()
         self.analyzer = BattleAnalyzer(metrics_file=os.path.join(output_dir, "battle_metrics.json"),
                                      visualization_dir=os.path.join(output_dir, "visualizations"))
         self.encoder = StrategyEncoder()
         
-        # Training configuration
+        # Training configuration - default values
         self.config = {
             "generations": 10,
             "battles_per_generation": 20,
@@ -61,6 +61,9 @@ class TrainingManager:
             with open(config_path, 'r') as f:
                 saved_config = json.load(f)
                 self.config.update(saved_config)
+                print(f"Configuration loaded from {config_path}: {self.config}")
+        else:
+            print(f"Configuration file {config_path} not found. Using default values.")
         
         # Create teams directory structure
         self.teams_dir = os.path.join(output_dir, "teams")
@@ -109,6 +112,47 @@ class TrainingManager:
             
         return file_paths
     
+    def select_battle_pairs(self, team_files):
+        """
+        Select pairs of strategies to create a complete round-robin tournament.
+        Each strategy battles every other strategy as both team A and team B.
+        
+        Args:
+            team_files: List of team Python files
+            
+        Returns:
+            List of (team1_file, team2_file) pairs to battle
+        """
+        pairs = []
+        
+        # Create round-robin tournament pairs
+        for i, team1_file in enumerate(team_files):
+            for j, team2_file in enumerate(team_files):
+                if i != j:  # Don't battle against self
+                    # Add both A vs B configurations
+                    pairs.append((team1_file, team2_file))
+        
+        # If we have too many pairs for the configured battles_per_generation,
+        # select a balanced subset, preserving position balance
+        battles_per_gen = self.config["battles_per_generation"]
+        if len(pairs) > battles_per_gen:
+            # Track how many times each file appears
+            file_counts = {}
+            for team1, team2 in pairs:
+                file_counts[team1] = file_counts.get(team1, 0) + 1
+                file_counts[team2] = file_counts.get(team2, 0) + 1
+            
+            # Sort pairs to prioritize those involving strategies with fewer battles
+            pairs.sort(key=lambda pair: file_counts[pair[0]] + file_counts[pair[1]])
+            
+            # Take top battles_per_gen pairs
+            pairs = pairs[:battles_per_gen]
+        
+        # Shuffle the final list to avoid systemic bias
+        random.shuffle(pairs)
+        
+        return pairs
+    
     def run_generation_battles(self, team_files):
         """
         Run battles between strategies for the current generation.
@@ -119,39 +163,12 @@ class TrainingManager:
         Returns:
             List of battle results
         """
-        battles_per_gen = self.config["battles_per_generation"]
-        
         print(f"\n=== Running Generation {self.current_generation} Battles ===")
         print(f"Number of strategies: {len(team_files)}")
-        print(f"Battles to run: {battles_per_gen}")
         
-        # Create pairs of strategies to battle
-        battle_pairs = []
-        
-        # First, ensure each strategy gets at least one battle
-        remaining_battles = battles_per_gen
-        strategies = team_files.copy()
-        random.shuffle(strategies)
-        
-        while strategies and remaining_battles > 0:
-            team1 = strategies.pop(0)
-            if strategies:
-                team2 = strategies.pop(0)
-            elif team_files:
-                # If we're out of unused strategies but still have battles, pick random opponents
-                team2 = random.choice(team_files)
-            else:
-                break
-                
-            battle_pairs.append((team1, team2))
-            remaining_battles -= 1
-        
-        # Fill remaining battles with random pairings
-        while remaining_battles > 0 and len(team_files) >= 2:
-            # Select two different strategies
-            team1, team2 = random.sample(team_files, 2)
-            battle_pairs.append((team1, team2))
-            remaining_battles -= 1
+        # Create pairs of strategies to battle using round-robin tournament structure
+        battle_pairs = self.select_battle_pairs(team_files)
+        print(f"Battles to run: {len(battle_pairs)}")
         
         # Run all battles
         all_results = []
@@ -201,11 +218,15 @@ class TrainingManager:
                 self.trainer.strategies[team2_id]["metrics"]["wins"] += 1
                 self.trainer.strategies[team1_id]["metrics"]["losses"] += 1
             
-            # Update win rates
+            # Update win rates and Wilson scores
             for strategy_id in [team1_id, team2_id]:
                 metrics = self.trainer.strategies[strategy_id]["metrics"]
                 if metrics["games_played"] > 0:
                     metrics["win_rate"] = metrics["wins"] / metrics["games_played"]
+                    if metrics["games_played"] >= 3:
+                        metrics["wilson_score"] = calculate_wilson_score(
+                            metrics["wins"], metrics["games_played"]
+                        )
     
     def evolve_strategies(self):
         """Evolve new strategies based on battle performance."""
@@ -241,13 +262,23 @@ class TrainingManager:
         print(f"Added {len(new_strategies)} new evolved strategies.")
     
     def find_best_strategy(self):
-        """Find the strategy with the best performance."""
-        top_strategies = self.analyzer.get_top_strategies(min_games=self.config["min_games_for_evolution"])
+        """Find the strategy with the best performance using Wilson score."""
+        # Use select_best_strategies from improved_strategy_selection
+        battle_metrics = self.analyzer.metrics
+        sorted_strategies = select_best_strategies(
+            battle_metrics,
+            min_games=self.config["min_games_for_evolution"],
+            confidence=0.95
+        )
         
-        if top_strategies:
-            self.best_strategy_id = top_strategies[0]["strategy_id"]
+        if sorted_strategies:
+            best_strategy = sorted_strategies[0]
+            self.best_strategy_id = best_strategy[0]
+            stats = best_strategy[1]
+            
             print(f"\nBest strategy found: {self.best_strategy_id}")
-            print(f"Win rate: {top_strategies[0]['win_rate']:.2f} ({top_strategies[0]['wins']}/{top_strategies[0]['games_played']})")
+            print(f"Win rate: {stats['win_rate']:.2f} ({stats['wins']}/{stats['games']} games)")
+            print(f"Wilson score: {stats['wilson_score']:.4f}")
             return self.best_strategy_id
         else:
             print("\nNo strategies with enough games to determine best yet.")
@@ -269,21 +300,10 @@ class TrainingManager:
         training_data_dir = "training_data/teams"
         for gen_folder in sorted(os.listdir(training_data_dir), reverse=True):
             if gen_folder.startswith("gen_"):
-                potential_path = os.path.join(training_data_dir, gen_folder, self.best_strategy_id)
+                potential_path = os.path.join(training_data_dir, gen_folder, f"{self.best_strategy_id}.py")
                 if os.path.exists(potential_path):
                     strategy_path = potential_path
                     break
-                
-                # Also check without .py extension
-                if self.best_strategy_id.endswith(".py"):
-                    potential_path = os.path.join(
-                        training_data_dir, 
-                        gen_folder, 
-                        self.best_strategy_id[:-3]
-                    )
-                    if os.path.exists(potential_path):
-                        strategy_path = potential_path
-                        break
                 
                 # Also check for files containing the ID
                 core_id = self.best_strategy_id
@@ -388,6 +408,9 @@ class TrainingManager:
                 f.write(f"- Type: {best.get('name', 'Unknown')}\n")
                 f.write(f"- Games played: {best['metrics']['games_played']}\n")
                 f.write(f"- Win rate: {best['metrics']['win_rate']:.2f} ({best['metrics']['wins']}/{best['metrics']['games_played']})\n")
+                wilson = best['metrics'].get('wilson_score', 0)
+                if wilson > 0:
+                    f.write(f"- Wilson score: {wilson:.4f}\n")
                 
                 # Strategy parameters
                 f.write("\nKey parameters:\n")
@@ -406,20 +429,25 @@ class TrainingManager:
             
             # Strategy evolution
             f.write("## Strategy Evolution\n\n")
-            f.write("| Generation | Strategies | Avg Win Rate | Best Win Rate |\n")
-            f.write("|------------|------------|--------------|---------------|\n")
+            f.write("| Generation | Strategies | Avg Win Rate | Best Win Rate | Best Wilson Score |\n")
+            f.write("|------------|------------|--------------|---------------|------------------|\n")
             for gen in sorted(strategies_by_gen.keys()):
                 strats = strategies_by_gen[gen]
                 win_rates = [self.trainer.strategies[s]["metrics"]["win_rate"] 
                            for s in strats 
                            if self.trainer.strategies[s]["metrics"]["games_played"] > 0]
                 
+                wilson_scores = [self.trainer.strategies[s]["metrics"].get("wilson_score", 0) 
+                               for s in strats 
+                               if self.trainer.strategies[s]["metrics"]["games_played"] >= 3]
+                
                 if win_rates:
                     avg_win_rate = sum(win_rates) / len(win_rates)
                     best_win_rate = max(win_rates)
-                    f.write(f"| {gen} | {len(strats)} | {avg_win_rate:.2f} | {best_win_rate:.2f} |\n")
+                    best_wilson = max(wilson_scores) if wilson_scores else 0
+                    f.write(f"| {gen} | {len(strats)} | {avg_win_rate:.2f} | {best_win_rate:.2f} | {best_wilson:.4f} |\n")
                 else:
-                    f.write(f"| {gen} | {len(strats)} | N/A | N/A |\n")
+                    f.write(f"| {gen} | {len(strats)} | N/A | N/A | N/A |\n")
             f.write("\n")
             
             # Include links to visualizations
@@ -491,16 +519,8 @@ def parse_arguments():
     
     parser.add_argument('--output-dir', type=str, default='training_data',
                       help='Directory to store training data and results')
-    parser.add_argument('--generations', type=int, default=10,
-                      help='Number of generations to train')
-    parser.add_argument('--battles', type=int, default=20,
-                      help='Number of battles per generation')
-    parser.add_argument('--strategies', type=int, default=4,
-                      help='Number of new strategies to create per generation')
     parser.add_argument('--headless', action='store_true',
-                      help='Run in headless mode (no graphics)')
-    parser.add_argument('--speed', type=int, default=3,
-                      help='Game speed multiplier')
+                      help='Run in headless mode (auto-close windows)')
     
     return parser.parse_args()
 
@@ -508,17 +528,13 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     
-    # Create training manager
+    # Create training manager with headless mode
     manager = TrainingManager(
         output_dir=args.output_dir,
-        headless=args.headless,
-        speed_multiplier=args.speed
+        headless=args.headless
     )
     
-    # Update configuration from command line args
-    manager.config["generations"] = args.generations
-    manager.config["battles_per_generation"] = args.battles
-    manager.config["strategies_per_generation"] = args.strategies
+    # Save the configuration (loaded from file)
     manager.save_config()
     
     # Run training

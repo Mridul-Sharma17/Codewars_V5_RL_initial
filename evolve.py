@@ -105,7 +105,7 @@ class StrategyEvolver:
     
     def _tournament_selection(self, strategies: List[Dict]) -> Dict:
         """
-        Select a strategy using tournament selection.
+        Select a strategy using tournament selection with Wilson score.
         
         Args:
             strategies: List of strategies to select from
@@ -113,6 +113,13 @@ class StrategyEvolver:
         Returns:
             Selected strategy
         """
+        # Import Wilson score if available, otherwise use win rate
+        try:
+            from improved_strategy_selection import calculate_wilson_score
+            use_wilson = True
+        except ImportError:
+            use_wilson = False
+        
         # Adjust tournament size if we have fewer strategies
         actual_tournament_size = min(self.tournament_size, len(strategies))
         
@@ -124,17 +131,27 @@ class StrategyEvolver:
         best_fitness = -1
         
         for strategy in tournament:
-            # Calculate fitness (weighted combination of win rate and games played)
-            win_rate = strategy["metrics"]["win_rate"]
-            games_played = strategy["metrics"]["games_played"]
+            metrics = strategy["metrics"]
+            wins = metrics.get("wins", 0)
+            games_played = metrics.get("games_played", 0)
             
-            # Fitness function: win_rate with a small bonus for experience
-            fitness = win_rate + (0.01 * min(games_played, 10))
-            
-            if fitness > best_fitness:
-                best_fitness = fitness
-                best_strategy = strategy
+            if games_played > 0:
+                # Calculate fitness using Wilson score if available
+                if use_wilson and games_played >= 3:
+                    fitness = calculate_wilson_score(wins, games_played)
+                else:
+                    # Fallback to win rate with a small bonus for experience
+                    win_rate = wins / games_played
+                    fitness = win_rate + (0.01 * min(games_played, 10))
+                
+                if fitness > best_fitness:
+                    best_fitness = fitness
+                    best_strategy = strategy
         
+        # If no strategy with games played, pick randomly
+        if best_strategy is None and tournament:
+            best_strategy = random.choice(tournament)
+            
         return best_strategy
     
     def _crossover(self, parent1: Dict, parent2: Dict) -> Dict:

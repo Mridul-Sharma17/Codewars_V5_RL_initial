@@ -51,20 +51,36 @@ def select_best_strategies(battle_metrics, min_games=3, confidence=0.95):
     # Count wins and games for each strategy
     strategy_wins = {}
     strategy_games = {}
+    strategy_positions = {"team1": {}, "team2": {}}
     
     for battle in battle_metrics:
-        team1 = battle.get("team1_file", "")
-        team2 = battle.get("team2_file", "")
+        team1_file = battle.get("team1_file", "")
+        team2_file = battle.get("team2_file", "")
+        team1_id = get_strategy_id(team1_file)
+        team2_id = get_strategy_id(team2_file)
         
-        if team1:
-            strategy_games[team1] = strategy_games.get(team1, 0) + 1
-            strategy_wins[team1] = strategy_wins.get(team1, 0) + battle.get("team1_win", 0)
-            
-        if team2:
-            strategy_games[team2] = strategy_games.get(team2, 0) + 1
-            strategy_wins[team2] = strategy_wins.get(team2, 0) + battle.get("team2_win", 0)
+        # Skip if we can't identify the strategy IDs
+        if not team1_id or not team2_id:
+            continue
+        
+        # Track games played in each position
+        strategy_positions["team1"][team1_id] = strategy_positions["team1"].get(team1_id, 0) + 1
+        strategy_positions["team2"][team2_id] = strategy_positions["team2"].get(team2_id, 0) + 1
+        
+        # Update games played
+        strategy_games[team1_id] = strategy_games.get(team1_id, 0) + 1
+        strategy_games[team2_id] = strategy_games.get(team2_id, 0) + 1
+        
+        # Update wins based on winner
+        winner = battle.get("winner")
+        if winner == battle.get("team1_name"):
+            # Team 1 won
+            strategy_wins[team1_id] = strategy_wins.get(team1_id, 0) + 1
+        elif winner == battle.get("team2_name"):
+            # Team 2 won
+            strategy_wins[team2_id] = strategy_wins.get(team2_id, 0) + 1
     
-    # Calculate Wilson scores
+    # Calculate Wilson scores and other stats
     strategy_stats = {}
     for strategy_id, games in strategy_games.items():
         if games >= min_games:
@@ -72,11 +88,19 @@ def select_best_strategies(battle_metrics, min_games=3, confidence=0.95):
             win_rate = float(wins) / games if games > 0 else 0
             wilson_score = calculate_wilson_score(wins, games, confidence)
             
+            # Track position balance (how often played as team1 vs team2)
+            team1_count = strategy_positions["team1"].get(strategy_id, 0)
+            team2_count = strategy_positions["team2"].get(strategy_id, 0)
+            position_balance = abs(team1_count - team2_count) / games if games > 0 else 1.0
+            
             strategy_stats[strategy_id] = {
                 "wins": wins,
                 "games": games,
                 "win_rate": win_rate,
-                "wilson_score": wilson_score
+                "wilson_score": wilson_score,
+                "team1_games": team1_count,
+                "team2_games": team2_count,
+                "position_balance": position_balance  # Lower is better (more balanced)
             }
     
     # Sort by Wilson score
@@ -87,3 +111,15 @@ def select_best_strategies(battle_metrics, min_games=3, confidence=0.95):
     )
     
     return sorted_strategies
+
+def get_strategy_id(filename):
+    """Extract strategy ID from filename"""
+    if not filename:
+        return None
+        
+    # Remove file extension if present
+    if filename.endswith('.py'):
+        filename = filename[:-3]
+        
+    # Return the filename as the strategy ID
+    return filename

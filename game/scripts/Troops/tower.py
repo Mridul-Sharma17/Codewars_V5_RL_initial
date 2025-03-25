@@ -30,8 +30,9 @@ class Tower:
         self.health = 7032
         self.max_health = 7032
         self.damage = 158
-        self.attack_range = 10 * size/4
+        self.attack_range = 8 * size/5
         self.dummy = None
+        self.dummy_original = None
         self.target = None
         self.size = size        # size = radius i.e. distance from center
         self.deploy_area = deploy_area

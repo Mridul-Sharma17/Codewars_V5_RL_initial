@@ -280,6 +280,88 @@ def deploy_troop(troop, position):
         
         return code
     
+    def generate_code_with_adaptive(self, strategy, output_file=None):
+        """
+        Generate Python code for a strategy with adaptive capabilities.
+        
+        Args:
+            strategy: Dictionary with strategy parameters
+            output_file: Optional file path to save code
+            
+        Returns:
+            String containing generated Python code
+        """
+        # Generate the base code
+        code = self.generate_code(strategy, output_file=None)
+        
+        # Check if this is an adaptive strategy
+        is_adaptive = False
+        if "adaptive_strategy" in strategy and strategy["adaptive_strategy"].get("enabled", True):
+            is_adaptive = True
+        
+        # Check if this is a counter strategy
+        is_counter = False
+        if "counter_strategy" in strategy and strategy["counter_strategy"].get("is_counter", False):
+            is_counter = True
+            
+        # If neither adaptive nor counter, just return the original code
+        if not (is_adaptive or is_counter):
+            if output_file:
+                with open(output_file, 'w') as f:
+                    f.write(code)
+            return code
+        
+        try:
+            # Import the adaptive code generator function
+            from adaptive_strategy import get_adaptive_strategy_code_segment
+            adaptive_code = get_adaptive_strategy_code_segment()
+            
+            # Insert the adaptive code before the return statement in the troops method
+            if "def troops(self, elixir):" in code:
+                # Find the position to insert pre_deploy_logic call
+                troops_method_pos = code.find("def troops(self, elixir):")
+                
+                # Add adaptive code before the return statement
+                handle_data_method = """
+        def handle_data(self, data):
+            '''Process game data before making decisions.'''
+            # Run pre-deployment logic if available
+            if hasattr(self, 'pre_deploy_logic'):
+                self.pre_deploy_logic(data)
+            
+            # Store tower references
+            self.my_tower = data.get('my_tower')
+            self.opponent_tower = data.get('opponent_tower')
+            
+            # Store troop costs if available
+            if 'troop_costs' in data:
+                self.troop_costs = data['troop_costs']
+            
+            # Return troop and position decisions
+            return self.decide_deployment(data)
+            
+        def decide_deployment(self, data):
+            '''Decide which troops to deploy and where.'''
+            elixir = data.get('elixir', 0)
+            troops_to_deploy = self.troops(elixir)
+            positions = self.positions(troops_to_deploy, elixir)
+            return troops_to_deploy, positions
+    """
+                
+                # Add adaptive methods
+                code += adaptive_code + handle_data_method
+        except ImportError:
+            # If the adaptive_strategy module isn't available, just return the original code
+            pass
+        
+        # Save to file if specified
+        if output_file:
+            with open(output_file, 'w') as f:
+                f.write(code)
+            print(f"Generated strategy code saved to {output_file}")
+            
+        return code
+    
     def _create_pratyaksh_template(self):
         """Create the specialized Pratyaksh strategy template"""
         return '''import random

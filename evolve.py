@@ -105,7 +105,7 @@ class StrategyEvolver:
     
     def _tournament_selection(self, strategies: List[Dict]) -> Dict:
         """
-        Select a strategy using tournament selection.
+        Select a strategy using tournament selection with Wilson score.
         
         Args:
             strategies: List of strategies to select from
@@ -113,6 +113,13 @@ class StrategyEvolver:
         Returns:
             Selected strategy
         """
+        # Import Wilson score if available, otherwise use win rate
+        try:
+            from improved_strategy_selection import calculate_wilson_score
+            use_wilson = True
+        except ImportError:
+            use_wilson = False
+        
         # Adjust tournament size if we have fewer strategies
         actual_tournament_size = min(self.tournament_size, len(strategies))
         
@@ -124,19 +131,89 @@ class StrategyEvolver:
         best_fitness = -1
         
         for strategy in tournament:
-            # Calculate fitness (weighted combination of win rate and games played)
-            win_rate = strategy["metrics"]["win_rate"]
-            games_played = strategy["metrics"]["games_played"]
+            metrics = strategy["metrics"]
+            wins = metrics.get("wins", 0)
+            games_played = metrics.get("games_played", 0)
             
-            # Fitness function: win_rate with a small bonus for experience
-            fitness = win_rate + (0.01 * min(games_played, 10))
-            
-            if fitness > best_fitness:
-                best_fitness = fitness
-                best_strategy = strategy
+            if games_played > 0:
+                # Calculate fitness using Wilson score if available
+                if use_wilson and games_played >= 3:
+                    fitness = calculate_wilson_score(wins, games_played)
+                else:
+                    # Fallback to win rate with a small bonus for experience
+                    win_rate = wins / games_played
+                    fitness = win_rate + (0.01 * min(games_played, 10))
+                
+                if fitness > best_fitness:
+                    best_fitness = fitness
+                    best_strategy = strategy
         
+        # If no strategy with games played, pick randomly
+        if best_strategy is None and tournament:
+            best_strategy = random.choice(tournament)
+            
         return best_strategy
     
+    def evolve_population_with_adaptive(self, strategies, num_offspring=4):
+        """
+        Create a new generation including both evolved and adaptive strategies.
+        
+        Args:
+            strategies: Dictionary of strategy_id -> strategy
+            num_offspring: Total number of new strategies to create
+            
+        Returns:
+            List of new strategies
+        """
+        # Import adaptive strategy manager
+        try:
+            from adaptive_strategy import AdaptiveStrategyManager
+            adaptive_manager = AdaptiveStrategyManager()
+        except ImportError:
+            print("Warning: AdaptiveStrategyManager not available, using only standard evolution")
+            return self.evolve_population(strategies, num_offspring)
+        
+        # Standard evolutionary offspring (60% of total)
+        evolved_count = max(1, int(num_offspring * 0.6))
+        offspring = self.evolve_population(strategies, evolved_count)
+        
+        # Generate adaptive strategies (20% of total)
+        adaptive_count = max(1, int(num_offspring * 0.2))
+        adaptive_strategies = adaptive_manager.generate_adaptive_strategies(
+            count=adaptive_count, 
+            base_strategies=strategies
+        )
+        
+        # Generate counter strategies (20% of total)
+        counter_count = num_offspring - evolved_count - adaptive_count
+        if counter_count > 0:
+            # Find top strategies to counter
+            sorted_strategies = sorted(
+                strategies.values(),
+                key=lambda s: s["metrics"].get("wilson_score", 0) 
+                            if "metrics" in s else 0,
+                reverse=True
+            )
+            top_strategies = sorted_strategies[:min(5, len(sorted_strategies))]
+            
+            counter_strategies = adaptive_manager.generate_counter_strategies(
+                opponent_strategies=top_strategies,
+                count=counter_count,
+                base_strategies=strategies
+            )
+        else:
+            counter_strategies = []
+        
+        # Combine all strategy types
+        all_strategies = offspring + adaptive_strategies + counter_strategies
+        
+        # Print summary of generated strategies
+        print(f"Generated {len(offspring)} evolved strategies")
+        print(f"Generated {len(adaptive_strategies)} adaptive strategies")
+        print(f"Generated {len(counter_strategies)} counter strategies")
+        
+        return all_strategies
+
     def _crossover(self, parent1: Dict, parent2: Dict) -> Dict:
         """
         Create a new strategy by combining two parent strategies.

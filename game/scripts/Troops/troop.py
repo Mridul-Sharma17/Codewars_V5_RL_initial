@@ -18,6 +18,7 @@ class Troop:
         self.size = std_size*size
         self.deploy_radius = 3*self.size
         self.dummy = None
+        self.dummy_original = None
         self.health = health
         self.max_health = health
         self.damage = damage
@@ -213,8 +214,8 @@ class Troop:
         distance = math.sqrt(dx**2 + dy**2)
         if distance > 0:
             self.prev_position = (
-                self.position[0] + self.velocity * dx / distance,
-                self.position[1] + self.velocity * dy / distance
+                self.position[0] + (self.velocity*ARENA_WIDTH/STANDARD_ARENA_WIDTH) * dx / distance,
+                self.position[1] + (self.velocity*ARENA_WIDTH/STANDARD_ARENA_WIDTH) * dy / distance
             )
 
     def update_orientation(self, target_position = None):

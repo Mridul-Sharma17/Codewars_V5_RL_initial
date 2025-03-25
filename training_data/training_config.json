@@ -1,7 +1,8 @@
 {
-  "generations": 10,
-  "battles_per_generation": 20,
-  "strategies_per_generation": 4,
-  "min_games_for_evolution": 5,
-  "tournament_size": 3
+  "generations": 3,
+  "battles_per_generation": 1000,
+  "strategies_per_generation": 2,
+  "min_games_for_evolution": 3,
+  "tournament_size": 2,
+  "max_strategies": 5
 }

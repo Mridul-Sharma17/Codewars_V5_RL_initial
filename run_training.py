@@ -46,9 +46,6 @@ class TrainingManager:
                                      visualization_dir=os.path.join(output_dir, "visualizations"))
         self.encoder = StrategyEncoder()
         
-        # Current date: 2025-03-24 23:35:38
-        # User: Mridul-Sharma17
-        
         # Training configuration - default values
         self.config = {
             "generations": 10,
@@ -84,9 +81,6 @@ class TrainingManager:
         # Track per-generation metrics
         self.generation_metrics = {}
         
-        # Track pruned strategies
-        self.pruned_strategies = []
-        
         # Load training state if exists
         state_path = os.path.join(output_dir, "training_state.json")
         if os.path.exists(state_path):
@@ -96,7 +90,6 @@ class TrainingManager:
                 self.best_strategy_id = state.get("best_strategy_id", None)
                 self.generation_champions = state.get("generation_champions", {})
                 self.generation_metrics = state.get("generation_metrics", {})
-                self.pruned_strategies = state.get("pruned_strategies", [])
     
     def save_config(self):
         """Save training configuration."""
@@ -112,7 +105,6 @@ class TrainingManager:
             "best_strategy_id": self.best_strategy_id,
             "generation_champions": self.generation_champions,
             "generation_metrics": self.generation_metrics,
-            "pruned_strategies": self.pruned_strategies,
             "timestamp": datetime.now().isoformat()
         }
         with open(state_path, 'w') as f:
@@ -297,79 +289,6 @@ class TrainingManager:
             if metrics["games"] > 0:
                 metrics["win_rate"] = metrics["wins"] / metrics["games"]
     
-    def prune_strategies(self):
-        """
-        Prune strategies to maintain only the best performing ones.
-        Uses current generation win rate for evaluation.
-        """
-        max_strategies = self.config["max_strategies"]
-        num_strategies = len(self.trainer.strategies)
-        
-        if num_strategies <= max_strategies:
-            print(f"No pruning needed. Current strategies ({num_strategies}) <= max strategies ({max_strategies}).")
-            return
-        
-        print(f"\n=== Pruning Strategies: {num_strategies} → {max_strategies} ===")
-        
-        # Get strategies with performance in current generation
-        gen_key = str(self.current_generation)
-        strategies_with_metrics = []
-        
-        for strategy_id, metrics in self.generation_metrics[gen_key].items():
-            if strategy_id in self.trainer.strategies and metrics["games"] >= 3:
-                strategies_with_metrics.append((strategy_id, metrics["win_rate"]))
-        
-        # Sort by current generation win rate
-        strategies_with_metrics.sort(key=lambda x: x[1], reverse=True)
-        
-        # Keep track of strategies to keep
-        keep_strategies = []
-        
-        # First keep generation champions
-        for gen, champion in self.generation_champions.items():
-            strategy_id = champion["id"]
-            if strategy_id in self.trainer.strategies and strategy_id not in keep_strategies:
-                keep_strategies.append(strategy_id)
-        
-        # Then add top performers from current generation
-        for strategy_id, _ in strategies_with_metrics:
-            if strategy_id not in keep_strategies:
-                keep_strategies.append(strategy_id)
-                if len(keep_strategies) >= max_strategies:
-                    break
-        
-        # If we still have slots, fill with strategies sorted by all-time win rate
-        if len(keep_strategies) < max_strategies:
-            remaining_strategies = []
-            for strategy_id, strategy in self.trainer.strategies.items():
-                if strategy_id not in keep_strategies:
-                    if strategy["metrics"]["games_played"] >= 3:
-                        win_rate = strategy["metrics"]["win_rate"]
-                        remaining_strategies.append((strategy_id, win_rate))
-            
-            # Sort by all-time win rate
-            remaining_strategies.sort(key=lambda x: x[1], reverse=True)
-            
-            # Add strategies until we reach max_strategies
-            for strategy_id, _ in remaining_strategies:
-                keep_strategies.append(strategy_id)
-                if len(keep_strategies) >= max_strategies:
-                    break
-        
-        # Pruning: remove strategies not in the keep list
-        to_prune = []
-        for strategy_id in list(self.trainer.strategies.keys()):
-            if strategy_id not in keep_strategies:
-                to_prune.append(strategy_id)
-                self.pruned_strategies.append(strategy_id)
-                del self.trainer.strategies[strategy_id]
-        
-        print(f"Pruned {len(to_prune)} strategies: {', '.join(to_prune[:5])}{'...' if len(to_prune) > 5 else ''}")
-        print(f"Remaining strategies: {len(self.trainer.strategies)}")
-        
-        # Save updated strategies
-        self.trainer.save_strategies()
-    
     def evolve_strategies(self):
         """Evolve new strategies based on battle performance."""
         print("\n=== Evolving New Strategies ===")
@@ -383,30 +302,22 @@ class TrainingManager:
         
         if not eligible_strategies:
             print("No strategies have enough games to evolve from yet.")
-            return
+            return []
         
-        # Calculate how many new strategies to create
-        current_count = len(self.trainer.strategies)
-        max_count = self.config["max_strategies"]
-        num_to_create = min(self.config["strategies_per_generation"], max_count - current_count)
-        
-        if num_to_create <= 0:
-            print("Maximum number of strategies reached. Pruning required before evolution.")
-            return
-        
-        print(f"Creating {num_to_create} new strategies...")
+        # Get number of strategies to create
+        num_new_strategies = self.config["strategies_per_generation"]
         
         # Generate evolved strategies with adaptive capabilities if available
         if hasattr(self.evolver, 'evolve_population_with_adaptive'):
             new_strategies = self.evolver.evolve_population_with_adaptive(
                 eligible_strategies, 
-                num_offspring=num_to_create
+                num_offspring=num_new_strategies
             )
         else:
             # Use standard evolution otherwise
             new_strategies = self.evolver.evolve_population(
                 eligible_strategies, 
-                num_offspring=num_to_create
+                num_offspring=num_new_strategies
             )
         
         # Add new strategies to trainer
@@ -417,10 +328,74 @@ class TrainingManager:
         self.trainer.save_strategies()
         
         print(f"Added {len(new_strategies)} new evolved strategies.")
+        return new_strategies
+    
+    def prune_strategies(self, new_strategies):
+        """
+        Prune strategies to maintain max_strategies limit based on current generation performance.
         
-        # Check if we need to prune
-        if len(self.trainer.strategies) > max_count:
-            self.prune_strategies()
+        Args:
+            new_strategies: List of newly added strategies (these will not be pruned)
+        """
+        max_strategies = self.config["max_strategies"]
+        
+        # If we're under the limit, no need to prune
+        if len(self.trainer.strategies) <= max_strategies:
+            return
+        
+        print(f"\n=== Pruning Strategies (Current: {len(self.trainer.strategies)}, Max: {max_strategies}) ===")
+        
+        # Get the current generation key
+        gen_key = str(self.current_generation)
+        
+        # Collect strategies with their performance data
+        strategy_performances = []
+        new_strategy_ids = [s["id"] for s in new_strategies]
+        
+        for strategy_id, strategy in self.trainer.strategies.items():
+            # Skip new strategies that haven't played a game yet
+            if strategy_id in new_strategy_ids:
+                print(f"Preserving new strategy: {strategy_id}")
+                continue
+                
+            # Get current generation performance if available
+            gen_win_rate = 0.0
+            if gen_key in self.generation_metrics and strategy_id in self.generation_metrics[gen_key]:
+                metrics = self.generation_metrics[gen_key][strategy_id]
+                if metrics["games"] > 0:
+                    gen_win_rate = metrics["win_rate"]
+            
+            # Use a tuple to store (strategy_id, generation win rate, games played)
+            strategy_performances.append((strategy_id, gen_win_rate, 
+                                         self.generation_metrics[gen_key].get(strategy_id, {}).get("games", 0)))
+        
+        # Sort by win rate (ascending) and then by games played (ascending)
+        # This sorts the worst performers first
+        strategy_performances.sort(key=lambda x: (x[1], x[2]))
+        
+        # Calculate how many to prune
+        num_to_keep = max_strategies - len(new_strategy_ids)
+        num_to_prune = max(0, len(strategy_performances) - num_to_keep)
+        
+        if num_to_prune <= 0:
+            print("No pruning needed.")
+            return
+        
+        # Identify strategies to prune
+        strategies_to_prune = strategy_performances[:num_to_prune]
+        
+        # Print pruning information
+        print(f"Pruning {num_to_prune} strategies:")
+        for strategy_id, win_rate, games in strategies_to_prune:
+            print(f"- {strategy_id}: Win rate {win_rate:.2f} ({games} games)")
+            
+            # Remove from trainer strategies
+            if strategy_id in self.trainer.strategies:
+                del self.trainer.strategies[strategy_id]
+        
+        # Save updated strategies
+        self.trainer.save_strategies()
+        print(f"After pruning: {len(self.trainer.strategies)} strategies remain")
     
     def find_generation_champion(self):
         """
@@ -549,7 +524,7 @@ class TrainingManager:
         
         return champions
     
-    def run_championship(self, top_n=5, battles_per_matchup=3):
+    def run_championship(self, top_n=5, battles_per_matchup=2):
         """
         Run a championship tournament to determine the best strategy.
         
@@ -719,12 +694,36 @@ class TrainingManager:
             ID of the best strategy
         """
         # For regular generations, just find the generation champion
-        champion_id = self.find_generation_champion()
+        if self.current_generation < self.current_generation + self.config["generations"]:
+            # Find generation champion
+            champion_id = self.find_generation_champion()
+            
+            if champion_id:
+                # Store as best for now (will be replaced in final generation)
+                self.best_strategy_id = champion_id
+                return champion_id
+            else:
+                print("\nNo strategies with enough games to determine best yet.")
+                return None
         
-        if champion_id:
-            # Store as best for now (will be replaced in final generation)
-            self.best_strategy_id = champion_id
-            return champion_id
+        # For the final generation, run the championship tournament
+        print("\n=== Final Generation: Running Championship Tournament ===")
+        best_strategy_id = self.run_championship(top_n=5, battles_per_matchup=3)
+        
+        if best_strategy_id:
+            # Update best strategy ID
+            self.best_strategy_id = best_strategy_id
+            
+            # Print info about the best strategy
+            strategy = self.trainer.strategies.get(best_strategy_id)
+            if strategy:
+                print(f"\nBest strategy selected: {best_strategy_id}")
+                if "metrics" in strategy:
+                    metrics = strategy["metrics"]
+                    print(f"Overall stats: Win rate {metrics.get('win_rate', 0):.2f} "
+                          f"({metrics.get('wins', 0)}/{metrics.get('games_played', 0)} games)")
+            
+            return best_strategy_id
         else:
             print("\nNo strategies with enough games to determine best yet.")
             return None
@@ -841,8 +840,7 @@ class TrainingManager:
             # Training summary
             f.write("## Training Summary\n\n")
             f.write(f"- Total generations: {self.current_generation}\n")
-            f.write(f"- Total active strategies: {num_strategies}\n")
-            f.write(f"- Total pruned strategies: {len(self.pruned_strategies)}\n")
+            f.write(f"- Total strategies: {num_strategies}\n")
             f.write(f"- Total battles: {total_battles}\n")
             if self.training_start_time:
                 duration = time.time() - self.training_start_time
@@ -889,41 +887,26 @@ class TrainingManager:
             
             # Strategy evolution
             f.write("## Strategy Evolution\n\n")
-            f.write("| Generation | Strategies | Avg Win Rate | Best Win Rate | Best Strategy |\n")
-            f.write("|------------|------------|--------------|---------------|---------------|\n")
+            f.write("| Generation | Strategies | Avg Win Rate | Best Win Rate | Best Wilson Score |\n")
+            f.write("|------------|------------|--------------|---------------|------------------|\n")
             for gen in sorted(strategies_by_gen.keys()):
                 strats = strategies_by_gen[gen]
+                win_rates = [self.trainer.strategies[s]["metrics"]["win_rate"] 
+                           for s in strats 
+                           if self.trainer.strategies[s]["metrics"]["games_played"] > 0]
                 
-                # Get strategies in this generation with metrics
-                gen_win_rates = []
-                best_win_rate = 0
-                best_strategy = None
+                wilson_scores = [self.trainer.strategies[s]["metrics"].get("wilson_score", 0) 
+                               for s in strats 
+                               if self.trainer.strategies[s]["metrics"]["games_played"] >= 3]
                 
-                for s in strats:
-                    if s in self.trainer.strategies and self.trainer.strategies[s]["metrics"]["games_played"] > 0:
-                        win_rate = self.trainer.strategies[s]["metrics"]["win_rate"]
-                        gen_win_rates.append(win_rate)
-                        if win_rate > best_win_rate:
-                            best_win_rate = win_rate
-                            best_strategy = s
-                
-                if gen_win_rates:
-                    avg_win_rate = sum(gen_win_rates) / len(gen_win_rates)
-                    f.write(f"| {gen} | {len(strats)} | {avg_win_rate:.2f} | {best_win_rate:.2f} | {best_strategy} |\n")
+                if win_rates:
+                    avg_win_rate = sum(win_rates) / len(win_rates)
+                    best_win_rate = max(win_rates)
+                    best_wilson = max(wilson_scores) if wilson_scores else 0
+                    f.write(f"| {gen} | {len(strats)} | {avg_win_rate:.2f} | {best_win_rate:.2f} | {best_wilson:.4f} |\n")
                 else:
                     f.write(f"| {gen} | {len(strats)} | N/A | N/A | N/A |\n")
             f.write("\n")
-            
-            # Pruned strategies 
-            if self.pruned_strategies:
-                f.write("## Pruned Strategies\n\n")
-                f.write(f"Total pruned strategies: {len(self.pruned_strategies)}\n\n")
-                f.write("Listing a sample of pruned strategies:\n\n")
-                for i, strategy_id in enumerate(self.pruned_strategies[:10]):
-                    f.write(f"{i+1}. {strategy_id}\n")
-                if len(self.pruned_strategies) > 10:
-                    f.write(f"... and {len(self.pruned_strategies) - 10} more\n")
-                f.write("\n")
             
             # Include links to visualizations
             f.write("## Visualizations\n\n")
@@ -962,17 +945,11 @@ class TrainingManager:
                 # Find generation champion
                 self.find_generation_champion()
                 
-                # Check if we need to prune before evolving
-                num_strategies = len(self.trainer.strategies)
-                max_strategies = self.config["max_strategies"]
-                num_to_create = self.config["strategies_per_generation"]
-                
-                if num_strategies + num_to_create > max_strategies:
-                    print("Need to prune before evolving new strategies")
-                    self.prune_strategies()
-                
                 # Evolve new strategies
-                self.evolve_strategies()
+                new_strategies = self.evolve_strategies()
+                
+                # Prune strategies to stay within max_strategies limit
+                self.prune_strategies(new_strategies)
                 
                 # Save training state
                 self.save_state()
